@@ -1,0 +1,10 @@
+     policy      offered      met_slo         shed       errors  goodput_rps     ttft_p50     ttft_p95     ttft_p99      tbt_p50      e2e_p95   prefix_hit         jain
+   direct            165           33            0            0         1.63        23098        40987        43463         10.0        43540         0.65        1.000
+   fifo              165           72           83            0         3.56         3007         6271         7495          9.9        10137         0.55        0.999
+   full              165           68           97            0         3.36         1261         8136         8711          9.9        11917         0.56        0.998
+   rr                165           71            0            0         3.50         6753        11269        12235         10.1        13123         0.60        0.999
+
+direct: offered=8.2/s over 20.2s, drained in 66.0s, tenant tokens={'globex': 3904, 'acme': 3968} share={'globex': '0.50', 'acme': '0.50'}, shed={}
+fifo: offered=8.2/s over 20.2s, drained in 30.8s, tenant tokens={'globex': 9600, 'acme': 10368} share={'globex': '0.48', 'acme': '0.52'}, shed={'deadline passed while queued': 83}
+full: offered=8.2/s over 20.2s, drained in 29.6s, tenant tokens={'globex': 9472, 'acme': 10240} share={'globex': '0.48', 'acme': '0.52'}, shed={'projected completion past deadline': 97}
+rr: offered=8.1/s over 20.3s, drained in 35.0s, tenant tokens={'globex': 9600, 'acme': 10304} share={'globex': '0.48', 'acme': '0.52'}, shed={}

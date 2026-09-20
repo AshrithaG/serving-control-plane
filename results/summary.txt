@@ -1,0 +1,10 @@
+     policy      offered      met_slo         shed       errors  goodput_rps     ttft_p50     ttft_p95     ttft_p99      tbt_p50      e2e_p95   prefix_hit         jain
+   direct            349           30            0            0         0.21        53556       109828       112924         10.0       110844         0.68        1.000
+   fifo              348           80          238            0         1.63         9133        20023        21036          9.7        23659         0.59        0.984
+   full              348           82          266            0         2.30         2430        11645        12235          9.7        15438         0.54        0.992
+   rr                348           63            0            0         0.85        20226        43248        45343          9.9        44423         0.66        0.998
+
+direct: window=141.0s tenants={'globex': 3456, 'acme': 3584} shed={}
+fifo: window=49.2s tenants={'acme': 13696, 'globex': 10624} shed={'deadline passed while queued': 238}
+full: window=35.7s tenants={'acme': 14016, 'globex': 11712} shed={'projected completion past deadline': 266}
+rr: window=73.7s tenants={'globex': 8384, 'acme': 9088} shed={}

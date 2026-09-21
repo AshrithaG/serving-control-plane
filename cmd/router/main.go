@@ -67,7 +67,12 @@ func main() {
 	weights := flag.String("weights", "", "tenant=weight pairs, default weight 1")
 	maxInflight := flag.Int("max-inflight", 8, "requests the router will keep dispatched at once")
 	records := flag.String("records", "run.jsonl", "per-request records")
+	protocol := flag.String("protocol", "sim", "sim | vllm")
+	model := flag.String("model", backend.Model, "served model name, vllm protocol only")
+	maxSeqs := flag.Int("max-num-seqs", backend.MaxRunningVLLM, "the engines' --max-num-seqs, vllm protocol only")
 	flag.Parse()
+	backend.Model = *model
+	backend.MaxRunningVLLM = *maxSeqs
 
 	m := router.Mode(*mode)
 	pl := placement.ByName(*place, *imbalance)
@@ -87,8 +92,12 @@ func main() {
 	}
 	defer rec.Close()
 
+	pool := parseBackends(*backends)
+	for _, r := range pool.Replicas {
+		r.Protocol = *protocol
+	}
 	rt := router.New(router.Config{
-		Mode: m, Pool: parseBackends(*backends), Placement: pl, Admission: adm,
+		Mode: m, Pool: pool, Placement: pl, Admission: adm,
 		Quantum: *quantum, Weights: parseWeights(*weights),
 		MaxInflight: *maxInflight, Records: rec,
 	})

@@ -30,6 +30,8 @@ type Stats struct {
 type Replica struct {
 	Name string
 	URL  string
+	// Protocol is "sim" for the stand-in engine or "vllm" for a real one.
+	Protocol string
 
 	client *http.Client
 
@@ -49,7 +51,7 @@ type Replica struct {
 
 func NewReplica(name, url string) *Replica {
 	return &Replica{
-		Name: name, URL: url,
+		Name: name, URL: url, Protocol: "sim",
 		client: &http.Client{Timeout: 10 * time.Minute},
 		// Seeds only. They are replaced by measurement after a few requests;
 		// the seed exists so the first admission decision is not a divide by
@@ -103,6 +105,20 @@ func (r *Replica) observe(promptTokens, outTokens int, prefill, decode time.Dura
 // Stats fetches engine-reported state, cached for 50ms so that a burst of
 // arrivals does not turn into a burst of stats calls.
 func (r *Replica) Stats(ctx context.Context) Stats {
+	if r.Protocol == "vllm" {
+		r.mu.Lock()
+		if time.Since(r.lastStatsAt) < 50*time.Millisecond {
+			s := r.lastStats
+			r.mu.Unlock()
+			return s
+		}
+		r.mu.Unlock()
+		s := r.statsVLLM(ctx)
+		r.mu.Lock()
+		r.lastStats, r.lastStatsAt = s, time.Now()
+		r.mu.Unlock()
+		return s
+	}
 	r.mu.Lock()
 	if time.Since(r.lastStatsAt) < 50*time.Millisecond {
 		s := r.lastStats
@@ -142,6 +158,21 @@ type Result struct {
 // arrived. Time to first token is measured at the router, not at the engine,
 // so queueing inside the engine is included where it belongs.
 func (r *Replica) Generate(ctx context.Context, id, prompt string, maxTokens int) (Result, error) {
+	if r.Protocol == "vllm" {
+		r.mu.Lock()
+		r.inflight++
+		r.outstanding += int64(maxTokens)
+		r.mu.Unlock()
+		res, err := r.generateVLLM(ctx, id, prompt, maxTokens)
+		r.mu.Lock()
+		r.inflight--
+		r.outstanding -= int64(maxTokens - res.OutTokens)
+		if r.outstanding < 0 {
+			r.outstanding = 0
+		}
+		r.mu.Unlock()
+		return res, err
+	}
 	body, _ := json.Marshal(map[string]any{"id": id, "prompt": prompt, "max_tokens": maxTokens})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.URL+"/generate", bytes.NewReader(body))
 	if err != nil {

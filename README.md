@@ -9,10 +9,12 @@ Nothing above it reasons about deadlines, tenants, or which replica already
 holds your context. Is a control plane that does worth building, and what does
 it actually buy?
 
-**State: the policies are implemented, tested, and measured against a simulated
-backend. Nothing here has been run on a GPU yet.** Every number below comes
-from the stand-in engine described under "What the backend is". The GPU run is
-the next step and the numbers will be replaced by measured ones, not adjusted.
+**State.** Measured on real hardware: two vLLM 0.28.0 engines serving
+Qwen3-1.7B on one RTX 4090, three seeds, 60 seconds of open-loop traffic per
+configuration, 19,353 requests with zero errors. The GPU result disagrees with
+the simulator in the way that matters, and both are kept below: the simulated
+section is the record of how the policies were developed, the GPU section is
+what they actually do.
 
 ## What it does
 
@@ -38,7 +40,60 @@ between them cannot come from a different client, backend, or workload.
 - **Goodput** is the metric, not throughput: requests that met their deadline,
   divided by the window over which load was offered.
 
+## Results on an RTX 4090
+
+Two vLLM engines (`--gpu-memory-utilization 0.42`, `--max-num-seqs 16`, prefix
+caching on) sharing one RTX 4090, the same workload generator and analysis as
+the simulated runs, 70% interactive requests (64 tokens, 3s deadline) and 30%
+batch (384 tokens, 20s deadline), `ignore_eos` so every request costs what it
+asked for. Median of three seeds, range in brackets. Raw records and the
+per-seed aggregate are in `results/gpu-20260921-1533/`.
+
+Offered 16 requests/s, the highest rate run:
+
+| policy | met SLO | goodput/s | TTFT p50 | TTFT p95 | TBT p50 | shed |
+|---|---|---|---|---|---|---|
+| direct, one engine | 919 [879-939] | 15.29 | 16 ms | 326 ms | 5.2 ms | 0 |
+| rr, two engines | 919 [879-940] | 15.29 | 32 ms | 677 ms | 11.1 ms | 0 |
+| fifo, two engines | 919 [879-939] | 15.29 | 37 ms | 449 ms | 11.1 ms | 0 |
+| full, two engines | 912 [870-919] | 15.18 | 36 ms | 344 ms | 11.1 ms | 9 [7-20] |
+
+At 4 and 8 requests/s every policy met the deadline for every request it was
+offered, and the only differences were latency: 4.9 ms between tokens on one
+engine against 10.5 ms on two, 14 ms to first token against 28 to 34 ms.
+
+**What the GPU says that the simulator did not.**
+
+- **The GPU was never overloaded.** At every rate tested, goodput tracks the
+  offered load. The simulator modelled 8 ms per token per sequence with four
+  slots, which made 14 requests/s roughly twice capacity; vLLM's continuous
+  batching on a 4090 is far faster than that model, so the overload regime where
+  the simulated policies diverged was never reached. The rates were chosen from
+  the simulator's capacity, and that was the mistake.
+- **Two engines on one GPU made latency worse and bought nothing.** They contend
+  for the same SMs, so each engine's decode steps wait on the other's. Time
+  between tokens roughly doubled (4.9 to 10.5 ms at 4 requests/s) and median
+  time to first token doubled, with no goodput gain at any rate tested. Whether
+  the second engine starts paying for itself once one engine saturates is the
+  open question the next run is for.
+- **Admission control is a small pure cost when nothing is overloaded.** The full
+  policy had the best tail latency of the two-engine configurations, p95 time to
+  first token 344 ms against 449 for FIFO and 677 for round robin, but on every
+  seed it refused 7 to 20 requests that FIFO then served inside their deadline,
+  0.7 to 2% of goodput. That is the expected cost of a conservative estimator,
+  now measured instead of assumed.
+- **The two engines were not equal.** The second engine sized its KV cache from
+  the memory the first left free and got 59,776 tokens against 49,904. Placement
+  that treats replicas as interchangeable is already wrong on one GPU.
+- **Prefix-cache hits were not measured on this path.** vLLM reports them as an
+  engine-wide counter, not per request, so the analysis prints n/a rather than
+  the zero it printed at first.
+
 ## Results, simulated backend
+
+From the stand-in engine, kept as the record of how the policies were built.
+Where these disagree with the GPU section above, the GPU section is right: in
+particular, the overload regime below never occurred on the real card.
 
 Two engines, four concurrent sequences each, 20s of open-loop Poisson arrivals,
 seed 1, mixed interactive (64 output tokens, 3s deadline) and batch (384 tokens,
@@ -171,7 +226,8 @@ statement about the policies, not about GPU serving.
 - The cost estimator learns decode and prefill rates by EWMA from completions.
   Estimator error is a failure mode, not a solved problem: a mis-estimate sheds
   work that would have fit.
-- Single-run numbers, seed 1. No repeats, no confidence intervals yet.
+- The simulated numbers are single runs, seed 1. The GPU numbers are three
+  seeds with ranges, one day, one card.
 
 ## Running it
 
@@ -192,8 +248,11 @@ go run ./cmd/router -mode full \
 
 ## Next
 
-1. Run the same four policies against two vLLM engines on the RTX 4090 and
-   replace every number above with a measured one.
-2. Repeat each configuration across seeds and report a spread, not a point.
+1. Rerun on the 4090 at rates that saturate one engine, which the first GPU
+   run never reached: `RATES="32 48 64" ./gpu/run_on_4090.sh`. That is where the
+   second engine, the placement policy and admission control can actually
+   differ, or be shown not to.
+2. Read vLLM's engine-wide prefix-cache counters before and after each run, so
+   prefix-aware placement can be judged on hardware.
 3. Work out whether deadline admission earns its complexity over FIFO plus
-   expiry-on-dispatch, and if it does not, say so here.
+   expiry-on-dispatch at overload, and if it does not, say so here.

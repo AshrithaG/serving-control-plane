@@ -91,7 +91,11 @@ def summarize(path, window_s=None):
         "ttft_p50": pct(ttft, 50), "ttft_p95": pct(ttft, 95), "ttft_p99": pct(ttft, 99),
         "tbt_p50": pct(tbt, 50), "tbt_p95": pct(tbt, 95),
         "e2e_p50": pct(e2e, 50), "e2e_p95": pct(e2e, 95), "e2e_p99": pct(e2e, 99),
-        "prefix_hit": sum(1 for r in done if r.get("prefix_hit")) / len(done) if done else float("nan"),
+        # Per-request prefix hits exist only on the simulated engine, which sends
+        # a header; vLLM reports hits as an engine-wide counter. A run with no hit
+        # at all is therefore "not measured", not zero, and must not print as 0.
+        "prefix_hit": (sum(1 for r in done if r.get("prefix_hit")) / len(done)
+                       if done and any(r.get("prefix_hit") for r in done) else float("nan")),
         "tenant_tokens": by_tenant,
         "jain": jain(list(by_tenant.values())),
         "shed_reasons": reasons,

@@ -12,6 +12,39 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Preflight. On 2026-09-11 this box had a driver/library mismatch after an
+# upgrade without a reboot; nothing below works in that state, so stop early.
+if ! nvidia-smi >/dev/null 2>&1; then
+  echo "nvidia-smi fails on this machine (driver/library mismatch?). The box needs a reboot by its admin." >&2
+  nvidia-smi 2>&1 | head -3 >&2
+  exit 1
+fi
+
+# vLLM lives in a virtualenv, not on the system Python. Find the first one that
+# can import it with a working GPU, the same way int8-linear's runner does.
+PY=${PYTHON:-}
+if [[ -z "$PY" ]]; then
+  for cand in "$HOME"/*/.venv/bin/python "$HOME"/*-env/bin/python "$HOME"/.venv/bin/python; do
+    [[ -x "$cand" ]] || continue
+    if "$cand" -c 'import torch, vllm; assert torch.cuda.is_available()' >/dev/null 2>&1; then
+      PY=$cand; break
+    fi
+  done
+fi
+if [[ -z "$PY" ]]; then
+  echo "no Python with vllm and a working GPU found; set PYTHON=/path/to/venv/bin/python" >&2
+  exit 1
+fi
+VLLM="$(dirname "$PY")/vllm"
+echo "using $PY"
+
+for port in 8000 8001 8080; do
+  if ss -ltn 2>/dev/null | grep -q ":$port "; then
+    echo "port $port is already in use on this machine; stop whatever holds it first" >&2
+    exit 1
+  fi
+done
+
 MODEL=${MODEL:-Qwen/Qwen3-1.7B}
 MAX_SEQS=${MAX_SEQS:-16}
 MEM=${MEM:-0.42}          # per engine; two engines must fit on one card
@@ -22,11 +55,11 @@ OUT=${OUT:-results/gpu-$(date +%Y%m%d-%H%M)}
 mkdir -p "$OUT"
 
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | tee "$OUT/gpu.txt"
-python3 -c "import vllm; print('vllm', vllm.__version__)" | tee -a "$OUT/gpu.txt"
+"$PY" -c "import vllm; print('vllm', vllm.__version__)" | tee -a "$OUT/gpu.txt"
 
 start_engine() { # port
-  vllm serve "$MODEL" --port "$1" --gpu-memory-utilization "$MEM" \
-    --max-num-seqs "$MAX_SEQS" --enable-prefix-caching --disable-log-requests \
+  "$VLLM" serve "$MODEL" --port "$1" --gpu-memory-utilization "$MEM" \
+    --max-num-seqs "$MAX_SEQS" --enable-prefix-caching \
     > "$OUT/engine-$1.log" 2>&1 &
   echo $!
 }
@@ -39,8 +72,11 @@ wait_ready() { # port
   return 1
 }
 
+# One at a time: the second engine sizes its KV cache from the memory the first
+# one leaves free, so starting both at once races for the same memory.
 E0=$(start_engine 8000); wait_ready 8000
 E1=$(start_engine 8001); wait_ready 8001
+echo "both engines up; the run takes about 40 minutes"
 trap 'kill $E0 $E1 2>/dev/null || true' EXIT
 
 for SEED in $SEEDS; do
@@ -61,7 +97,7 @@ for SEED in $SEEDS; do
       # Let both engines drain so one run's backlog does not leak into the next.
       sleep 5
     done
-    python3 analysis/analyze.py "$OUT"/gpu-s${SEED}-r${RATE}-*.jsonl | tee "$OUT/summary-s${SEED}-r${RATE}.txt"
+    "$PY" analysis/analyze.py "$OUT"/gpu-s${SEED}-r${RATE}-*.jsonl | tee "$OUT/summary-s${SEED}-r${RATE}.txt"
   done
 done
 echo "results in $OUT"

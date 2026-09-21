@@ -12,6 +12,10 @@ package main
 
 import (
 	"container/list"
+	"context"
+	"strings"
+
+	"github.com/AshrithaG/serving-control-plane/internal/identity"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -181,15 +185,57 @@ func main() {
 	alpha := flag.Float64("alpha", 0.06, "decode slowdown per extra concurrent sequence")
 	hitMul := flag.Float64("cache-hit-mul", 0.15, "prefill multiplier on a prefix-cache hit")
 	cacheCap := flag.Int("cache-cap", 64, "prefixes the cache holds")
+	socket := flag.String("spiffe-socket", "", "SPIRE agent Workload API socket; enables mTLS")
+	allow := flag.String("allow-id", "", "comma-separated SPIFFE IDs allowed to call this backend")
 	flag.Parse()
 
 	e := newEngine(*maxRunning, *prefillUS, *decodeMS, *alpha, *hitMul, *cacheCap)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/generate", e.handleGenerate)
+	seen := &peerLog{serials: map[string]bool{}}
+	mux.HandleFunc("/generate", seen.wrap(e.handleGenerate))
 	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(e.stats())
 	})
 	log.Printf("fakebackend on %s (max-running=%d decode-ms=%.1f alpha=%.2f)", *addr, *maxRunning, *decodeMS, *alpha)
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	log.Fatal(srv.ListenAndServe())
+	if *socket == "" {
+		log.Fatal(srv.ListenAndServe())
+	}
+	src, err := identity.Source(context.Background(), *socket)
+	if err != nil {
+		log.Fatalf("workload API: %v", err)
+	}
+	defer src.Close()
+	go identity.WatchRotation(context.Background(), src, "backend")
+	cfg, err := identity.ServerConfig(src, strings.Split(*allow, ",")...)
+	if err != nil {
+		log.Fatal(err)
+	}
+	srv.TLSConfig = cfg
+	log.Printf("mTLS on, accepting only %s", *allow)
+	// Handshake failures, including refused identities, land in the server's
+	// error log, which is where the verification script looks for them.
+	log.Fatal(srv.ListenAndServeTLS("", ""))
+}
+
+// peerLog records each distinct client certificate the backend has seen, so a
+// rotation on the router's side shows up here as a new serial from the same ID.
+type peerLog struct {
+	mu      sync.Mutex
+	serials map[string]bool
+}
+
+func (p *peerLog) wrap(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+			serial := identity.Serial(r.TLS.PeerCertificates[0])
+			p.mu.Lock()
+			if !p.serials[serial] {
+				p.serials[serial] = true
+				log.Printf("peer %s serial=%s", identity.PeerID(r), serial)
+			}
+			p.mu.Unlock()
+		}
+		h(w, r)
+	}
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/AshrithaG/serving-control-plane/internal/admission"
 	"github.com/AshrithaG/serving-control-plane/internal/backend"
+	"github.com/AshrithaG/serving-control-plane/internal/identity"
 	"github.com/AshrithaG/serving-control-plane/internal/placement"
 	"github.com/AshrithaG/serving-control-plane/internal/record"
 	"github.com/AshrithaG/serving-control-plane/internal/router"
@@ -70,6 +72,8 @@ func main() {
 	protocol := flag.String("protocol", "sim", "sim | vllm")
 	model := flag.String("model", backend.Model, "served model name, vllm protocol only")
 	maxSeqs := flag.Int("max-num-seqs", backend.MaxRunningVLLM, "the engines' --max-num-seqs, vllm protocol only")
+	socket := flag.String("spiffe-socket", "", "SPIRE agent Workload API socket; enables mTLS to backends")
+	backendID := flag.String("backend-id", "", "SPIFFE ID every backend must present")
 	flag.Parse()
 	backend.Model = *model
 	backend.MaxRunningVLLM = *maxSeqs
@@ -95,6 +99,28 @@ func main() {
 	pool := parseBackends(*backends)
 	for _, r := range pool.Replicas {
 		r.Protocol = *protocol
+	}
+	if *socket != "" {
+		src, err := identity.Source(context.Background(), *socket)
+		if err != nil {
+			log.Fatalf("workload API: %v", err)
+		}
+		defer src.Close()
+		go identity.WatchRotation(context.Background(), src, "router")
+		cfg, err := identity.ClientConfig(src, *backendID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, r := range pool.Replicas {
+			r.SetTransport(&http.Transport{
+				TLSClientConfig: cfg.Clone(), MaxIdleConnsPerHost: 64,
+				// Idle connections are closed after 10s so new handshakes, and
+				// with them rotated certificates, happen during a long run.
+				IdleConnTimeout: 10 * time.Second, ForceAttemptHTTP2: false,
+				TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
+			})
+		}
+		log.Printf("mTLS to backends, requiring %s", *backendID)
 	}
 	rt := router.New(router.Config{
 		Mode: m, Pool: pool, Placement: pl, Admission: adm,

@@ -98,6 +98,57 @@ Kept because the fixes are the interesting part.
    replica's slots, overestimating the wait by roughly the replica count and
    shedding work the pool could have served.
 
+## Workload identity: SPIFFE and SPIRE
+
+Encryption between the router and its backends is the easy part. The claim
+worth testing is authorization: a backend should accept the router and nothing
+else, including a pod elsewhere in the cluster holding a perfectly valid
+identity of its own.
+
+`deploy/spire/` runs SPIRE 1.15.3 in a kind cluster. The SPIRE agent attests each
+pod by its Kubernetes service account and issues an X.509 SVID. Backends serve
+mutual TLS and authorize by SPIFFE ID (`spiffe://example.org/ns/scp/sa/router`
+only); the router, in turn, only connects to a peer presenting the backend ID.
+Certificates live two minutes on purpose, so rotation happens several times
+inside one run instead of being assumed. `deploy/spire/verify.sh` produces every
+number below; the raw output is in `results/identity/`.
+
+**Rotation under load.** Five minutes of traffic, 861 requests, 0 failed, while
+the router went through 6 certificates. Each backend logged all 6 distinct
+router certificate serials, so the rotated certificates were actually presented
+in new handshakes, not just fetched.
+
+**Refusal, with a positive control.** The same probe binary, run under two
+service accounts against a backend:
+
+| attempt | as `intruder` | as `router` |
+|---|---|---|
+| plain HTTP to the TLS port | refused, 400 | refused, 400 |
+| TLS with no client certificate | refused, `certificate required` | refused, `certificate required` |
+| mTLS with the pod's own valid SVID | refused, `bad certificate` | **accepted, 200** |
+
+The last row is the one that matters. The intruder's certificate is valid,
+issued by the same SPIRE server for the same trust domain; it is refused because
+of who it names. The router column is the control: without it, three refusals
+could just mean the probe is broken.
+
+**Revocation is not instant, and the number says how slow it is.** Deleting the
+router's registration entry mid-traffic, the first request failed **146 seconds**
+later, which is longer than the two-minute certificate lifetime. The router's log
+shows one more certificate issued around the time of the deletion, before the
+agent learned of it, and TLS checks a certificate only at the handshake, so an
+already-open connection can outlive the certificate that opened it. Both points
+are inferences from this one run; the verification script now stamps wall-clock
+times on the deletion and the first failure so the next run can separate them.
+The practical reading: revocation in this setup is bounded by the SVID lifetime
+plus agent sync plus connection lifetime, and anyone relying on it should cap all
+three. Restoring the entry brought traffic back 10 seconds later.
+
+```bash
+./deploy/spire/up.sh       # kind cluster, SPIRE, registration entries, router and backends
+./deploy/spire/verify.sh   # rotation, refusal, revocation
+```
+
 ## What the backend is
 
 `cmd/fakebackend` is a model of an engine, not an engine. It reproduces the four

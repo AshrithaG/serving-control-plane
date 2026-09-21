@@ -1,0 +1,20 @@
+curl: (7) Failed to connect to 127.0.0.1 port 18080 after 0 ms: Couldn't connect to server
+== 1. rotation under traffic ==
+requests completed: 861, failed: 0
+router certificates used: 6
+distinct router certificates seen by backend-0: 6
+distinct router certificates seen by backend-1: 6
+== 2. refusal, with a positive control ==
+-- as intruder
+{"attempt":"plaintext","got_in":false,"detail":"400 Bad Request Client sent an HTTP request to an HTTPS server.\n"}
+{"attempt":"tls_no_client_cert","got_in":false,"detail":"Get \"https://backend-0.scp.svc:8100/stats\": remote error: tls: certificate required"}
+{"attempt":"valid_svid_wrong_identity (spiffe://example.org/ns/scp/sa/intruder)","got_in":false,"detail":"Get \"https://backend-0.scp.svc:8100/stats\": remote error: tls: bad certificate"}
+-- as router
+{"attempt":"plaintext","got_in":false,"detail":"400 Bad Request Client sent an HTTP request to an HTTPS server.\n"}
+{"attempt":"tls_no_client_cert","got_in":false,"detail":"Get \"https://backend-0.scp.svc:8100/stats\": remote error: tls: certificate required"}
+{"attempt":"valid_svid_wrong_identity (spiffe://example.org/ns/scp/sa/router)","got_in":true,"detail":"200 OK {\"running\":0,\"waiting\":0,\"max_running\":8,\"cache_usage\":1,\"cached_items\":64}\n"}
+== 3. revocation ==
+deleted router entry b71b6387-b4c1-412c-80d8-16b9d27271d3
+first failed request 146s after deletion
+traffic succeeding again 10s after the entry was restored
+exit=0

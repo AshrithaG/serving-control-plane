@@ -1,0 +1,3 @@
+deleted router entry b71b6387-b4c1-412c-80d8-16b9d27271d3
+first failed request 146s after deletion
+traffic succeeding again 10s after the entry was restored

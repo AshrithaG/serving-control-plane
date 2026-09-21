@@ -60,6 +60,9 @@ func NewReplica(name, url string) *Replica {
 	}
 }
 
+// SetTransport swaps the HTTP transport, used to put mTLS under every call.
+func (r *Replica) SetTransport(rt http.RoundTripper) { r.client.Transport = rt }
+
 func (r *Replica) Inflight() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

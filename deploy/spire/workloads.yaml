@@ -1,0 +1,95 @@
+# The router, two backends, and an intruder. All three service accounts get a
+# valid SPIFFE identity from the same trust domain; only the router's is
+# allowed to call a backend. The intruder exists to prove that.
+apiVersion: v1
+kind: Namespace
+metadata: { name: scp }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: router, namespace: scp }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: backend, namespace: scp }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: intruder, namespace: scp }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: backend-0, namespace: scp }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: backend-0 } }
+  template:
+    metadata: { labels: { app: backend-0 } }
+    spec:
+      serviceAccountName: backend
+      containers:
+        - name: backend
+          image: scp:identity
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/fakebackend", "-addr", ":8100", "-max-running", "8",
+                    "-spiffe-socket", "unix:///run/spire/sockets/agent.sock",
+                    "-allow-id", "spiffe://example.org/ns/scp/sa/router"]
+          volumeMounts: [{ name: spire-socket, mountPath: /run/spire/sockets, readOnly: true }]
+      volumes: [{ name: spire-socket, hostPath: { path: /run/spire/sockets, type: Directory } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: backend-0, namespace: scp }
+spec: { selector: { app: backend-0 }, ports: [{ port: 8100, targetPort: 8100 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: backend-1, namespace: scp }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: backend-1 } }
+  template:
+    metadata: { labels: { app: backend-1 } }
+    spec:
+      serviceAccountName: backend
+      containers:
+        - name: backend
+          image: scp:identity
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/fakebackend", "-addr", ":8100", "-max-running", "8",
+                    "-spiffe-socket", "unix:///run/spire/sockets/agent.sock",
+                    "-allow-id", "spiffe://example.org/ns/scp/sa/router"]
+          volumeMounts: [{ name: spire-socket, mountPath: /run/spire/sockets, readOnly: true }]
+      volumes: [{ name: spire-socket, hostPath: { path: /run/spire/sockets, type: Directory } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: backend-1, namespace: scp }
+spec: { selector: { app: backend-1 }, ports: [{ port: 8100, targetPort: 8100 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: router, namespace: scp }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: router } }
+  template:
+    metadata: { labels: { app: router } }
+    spec:
+      serviceAccountName: router
+      containers:
+        - name: router
+          image: scp:identity
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/router", "-addr", ":8080", "-mode", "rr",
+                    "-backends", "r0=https://backend-0.scp.svc:8100,r1=https://backend-1.scp.svc:8100",
+                    "-records", "/tmp/run.jsonl",
+                    "-spiffe-socket", "unix:///run/spire/sockets/agent.sock",
+                    "-backend-id", "spiffe://example.org/ns/scp/sa/backend"]
+          volumeMounts: [{ name: spire-socket, mountPath: /run/spire/sockets, readOnly: true }]
+      volumes: [{ name: spire-socket, hostPath: { path: /run/spire/sockets, type: Directory } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: router, namespace: scp }
+spec: { selector: { app: router }, ports: [{ port: 8080, targetPort: 8080 }] }

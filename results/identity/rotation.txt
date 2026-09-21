@@ -1,0 +1,4 @@
+requests completed: 861, failed: 0
+router certificates used: 6
+distinct router certificates seen by backend-0: 6
+distinct router certificates seen by backend-1: 6

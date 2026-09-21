@@ -1,0 +1,17 @@
+# One-shot probe. The service account is substituted in by verify.sh: as
+# "intruder" it must be refused every way it tries, and as "router" the
+# same probe must get in, which is what shows the probe itself works.
+apiVersion: v1
+kind: Pod
+metadata: { name: probe-SA, namespace: scp }
+spec:
+  serviceAccountName: SA
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: scp:identity
+      imagePullPolicy: IfNotPresent
+      command: ["/usr/local/bin/idprobe", "-target", "https://backend-0.scp.svc:8100/stats",
+                "-spiffe-socket", "unix:///run/spire/sockets/agent.sock"]
+      volumeMounts: [{ name: spire-socket, mountPath: /run/spire/sockets, readOnly: true }]
+  volumes: [{ name: spire-socket, hostPath: { path: /run/spire/sockets, type: Directory } }]

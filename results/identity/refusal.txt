@@ -1,0 +1,8 @@
+-- as intruder
+{"attempt":"plaintext","got_in":false,"detail":"400 Bad Request Client sent an HTTP request to an HTTPS server.\n"}
+{"attempt":"tls_no_client_cert","got_in":false,"detail":"Get \"https://backend-0.scp.svc:8100/stats\": remote error: tls: certificate required"}
+{"attempt":"valid_svid_wrong_identity (spiffe://example.org/ns/scp/sa/intruder)","got_in":false,"detail":"Get \"https://backend-0.scp.svc:8100/stats\": remote error: tls: bad certificate"}
+-- as router
+{"attempt":"plaintext","got_in":false,"detail":"400 Bad Request Client sent an HTTP request to an HTTPS server.\n"}
+{"attempt":"tls_no_client_cert","got_in":false,"detail":"Get \"https://backend-0.scp.svc:8100/stats\": remote error: tls: certificate required"}
+{"attempt":"valid_svid_wrong_identity (spiffe://example.org/ns/scp/sa/router)","got_in":true,"detail":"200 OK {\"running\":0,\"waiting\":0,\"max_running\":8,\"cache_usage\":1,\"cached_items\":64}\n"}

@@ -131,8 +131,10 @@ func (rt *Router) Handle(w http.ResponseWriter, r *http.Request) {
 
 	switch rt.cfg.Mode {
 	case Direct, RoundRobin:
-		rt.dispatchNow(r.Context(), req, rec, arrival)
-		w.WriteHeader(http.StatusOK)
+		// The status has to come from the dispatch. Answering 200 regardless
+		// hid every backend failure from the client, including a refused mTLS
+		// handshake, which is exactly the failure the identity tests look for.
+		w.WriteHeader(rt.dispatchNow(r.Context(), req, rec, arrival))
 		return
 	}
 
@@ -246,7 +248,7 @@ func (rt *Router) serve(ctx context.Context, q *queued) {
 
 // dispatchNow is the unqueued path used by the Direct and RoundRobin
 // baselines: straight to a replica, no admission, no fairness.
-func (rt *Router) dispatchNow(ctx context.Context, req types.Request, rec record.Record, arrival time.Time) {
+func (rt *Router) dispatchNow(ctx context.Context, req types.Request, rec record.Record, arrival time.Time) int {
 	var rep *backend.Replica
 	if rt.cfg.Mode == Direct {
 		rep = rt.cfg.Pool.Replicas[0]
@@ -261,7 +263,7 @@ func (rt *Router) dispatchNow(ctx context.Context, req types.Request, rec record
 		rt.failed.Add(1)
 		rec.Error = err.Error()
 		_ = rt.cfg.Records.Write(rec)
-		return
+		return http.StatusBadGateway
 	}
 	rt.completed.Add(1)
 	rec.FirstTokenMS = rt.cfg.Records.Since(res.FirstToken)
@@ -269,6 +271,7 @@ func (rt *Router) dispatchNow(ctx context.Context, req types.Request, rec record
 	rec.OutTokens = res.OutTokens
 	rec.PrefixHit = res.PrefixHit
 	_ = rt.cfg.Records.Write(rec)
+	return http.StatusOK
 }
 
 // Stats is the operator view, served at /stats.

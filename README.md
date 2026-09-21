@@ -88,8 +88,11 @@ Kept because the fixes are the interesting part.
 2. **Goodput was measured in a way that rewarded shedding.** Dividing successes
    by the span until the last request drained gives a shedding policy a smaller
    denominator for the same numerator. Under that denominator the full policy
-   looked like it beat FIFO by 41%. Dividing by the offered-load window instead,
-   which is identical across policies, the advantage is 2%.
+   looked 41% ahead of FIFO at 14 requests/s. Divided by the offered-load
+   window instead, which is identical across policies, it was 14% behind
+   (3.42 against 3.97 goodput/s). The 2% edge it has now appeared only after
+   the admission fix below; the saved runs for each stage are in `results/v1-*`
+   and `results/v2-*`.
 3. **Admission mixed per-replica and pool-level state.** It charged one
    replica's token debt plus the whole router's shared queue against that single
    replica's slots, overestimating the wait by roughly the replica count and

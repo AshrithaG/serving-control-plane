@@ -10,11 +10,10 @@ holds your context. Is a control plane that does worth building, and what does
 it actually buy?
 
 **State.** Measured on real hardware: two vLLM 0.28.0 engines serving
-Qwen3-1.7B on one RTX 4090, three seeds, 60 seconds of open-loop traffic per
-configuration, 19,353 requests with zero errors. The GPU result disagrees with
-the simulator in the way that matters, and both are kept below: the simulated
-section is the record of how the policies were developed, the GPU section is
-what they actually do.
+Qwen3-1.7B on one RTX 4090, six offered rates from well below to four times past
+saturation, three seeds each, 118,722 requests with zero errors. The simulated
+results are kept further down as the record of how the policies were developed;
+where they disagree with the GPU, the GPU is right.
 
 ## What it does
 
@@ -42,52 +41,90 @@ between them cannot come from a different client, backend, or workload.
 
 ## Results on an RTX 4090
 
-Two vLLM engines (`--gpu-memory-utilization 0.42`, `--max-num-seqs 16`, prefix
-caching on) sharing one RTX 4090, the same workload generator and analysis as
-the simulated runs, 70% interactive requests (64 tokens, 3s deadline) and 30%
-batch (384 tokens, 20s deadline), `ignore_eos` so every request costs what it
-asked for. Median of three seeds, range in brackets. Raw records and the
-per-seed aggregate are in `results/gpu-20260921-1533/`.
+Two vLLM 0.28.0 engines (`--gpu-memory-utilization 0.42`, `--max-num-seqs 16`,
+prefix caching on) serving Qwen3-1.7B on one RTX 4090. The workload generator
+and analysis are the same as for the simulated runs: 70% interactive requests
+(64 tokens, 3s deadline) and 30% batch requests (384 tokens, 20s deadline),
+with `ignore_eos` so every request costs what it asked for. Two runs, six
+offered rates, three seeds each, 60 seconds per configuration: 118,722 requests
+and zero errors. Raw records are in `results/gpu-20260921-1533/` (4 to 16
+requests/s) and `results/gpu-20260921-1736/` (32 to 64).
 
-Offered 16 requests/s, the highest rate run:
+### Goodput across the whole range
 
-| policy | met SLO | goodput/s | TTFT p50 | TTFT p95 | TBT p50 | shed |
-|---|---|---|---|---|---|---|
-| direct, one engine | 919 [879-939] | 15.29 | 16 ms | 326 ms | 5.2 ms | 0 |
-| rr, two engines | 919 [879-940] | 15.29 | 32 ms | 677 ms | 11.1 ms | 0 |
-| fifo, two engines | 919 [879-939] | 15.29 | 37 ms | 449 ms | 11.1 ms | 0 |
-| full, two engines | 912 [870-919] | 15.18 | 36 ms | 344 ms | 11.1 ms | 9 [7-20] |
+Median of three seeds, in requests per second that met their deadline.
 
-At 4 and 8 requests/s every policy met the deadline for every request it was
-offered, and the only differences were latency: 4.9 ms between tokens on one
-engine against 10.5 ms on two, 14 ms to first token against 28 to 34 ms.
+| offered | direct, one engine | rr, two engines | fifo, two engines | full, two engines |
+|---|---|---|---|---|
+| 4 | 4.07 | 4.07 | 4.07 | 4.07 |
+| 8 | 7.67 | 7.67 | 7.67 | 7.67 |
+| 16 | 15.29 | 15.29 | 15.29 | 15.18 |
+| 32 | 6.48 | 5.20 | **9.65** | 8.28 |
+| 48 | 4.28 | 3.72 | 5.13 | **7.15** |
+| 64 | 3.63 | 3.30 | 4.25 | **7.35** |
 
-**What the GPU says that the simulator did not.**
+Median time to first token at 64 requests/s: 66.4s direct, 72.3s round robin,
+19.3s FIFO, 3.8s full.
 
-- **The GPU was never overloaded.** At every rate tested, goodput tracks the
-  offered load. The simulator modelled 8 ms per token per sequence with four
-  slots, which made 14 requests/s roughly twice capacity; vLLM's continuous
-  batching on a 4090 is far faster than that model, so the overload regime where
-  the simulated policies diverged was never reached. The rates were chosen from
-  the simulator's capacity, and that was the mistake.
-- **Two engines on one GPU made latency worse and bought nothing.** They contend
-  for the same SMs, so each engine's decode steps wait on the other's. Time
-  between tokens roughly doubled (4.9 to 10.5 ms at 4 requests/s) and median
-  time to first token doubled, with no goodput gain at any rate tested. Whether
-  the second engine starts paying for itself once one engine saturates is the
-  open question the next run is for.
-- **Admission control is a small pure cost when nothing is overloaded.** The full
-  policy had the best tail latency of the two-engine configurations, p95 time to
-  first token 344 ms against 449 for FIFO and 677 for round robin, but on every
-  seed it refused 7 to 20 requests that FIFO then served inside their deadline,
-  0.7 to 2% of goodput. That is the expected cost of a conservative estimator,
-  now measured instead of assumed.
-- **The two engines were not equal.** The second engine sized its KV cache from
-  the memory the first left free and got 59,776 tokens against 49,904. Placement
-  that treats replicas as interchangeable is already wrong on one GPU.
+**Below the knee, the policies do not matter.** Up to 16 requests/s everything
+met its deadline under every policy and goodput equals offered load. The one
+cost of admission control there: at 16 requests/s it refused 7 to 20 requests
+per seed that FIFO then served in time, 0.7 to 2% of goodput.
+
+**Just past the knee, FIFO wins.** At 32 requests/s FIFO delivers 9.65 against
+the full policy's 8.28. Admission control is too conservative there: it refuses
+work the engines could have finished.
+
+**Deep past it, only admission control holds up.** From 32 to 64 requests/s the
+full policy's goodput stays between 7.15 and 8.28, while FIFO falls from 9.65 to
+4.25. Without a queue in the router at all, direct and round robin collapse the
+classic way: every request is eventually served, but 79 to 84% of them late at
+32 requests/s and 94 to 95% at 64, with median time to first token past a
+minute.
+
+### Where the advantage actually comes from
+
+Summed over three seeds at 64 requests/s:
+
+| policy | class | offered | met deadline | shed | finished late |
+|---|---|---|---|---|---|
+| fifo | interactive | 7,729 | 204 (2.6%) | 7,479 | 46 |
+| fifo | batch | 3,262 | 556 (17.0%) | 1,566 | 1,140 |
+| full | interactive | 7,729 | 125 (1.6%) | 7,604 | 0 |
+| full | batch | 3,260 | 1,199 (36.8%) | 1,710 | 351 |
+
+The headline number needs this table beside it:
+
+- **The full policy's advantage is batch traffic.** FIFO dispatches batch
+  requests that are already too old to finish in time: 1,140 of them used GPU
+  time and missed their deadline anyway. The full policy refuses those at
+  arrival, so the batch requests it admits finish.
+- **Neither policy keeps interactive users served past saturation.** A
+  3-second deadline is lost to queueing under both, and the full policy
+  serves *fewer* interactive requests than FIFO, not more.
+- **What admission control admits, it delivers.** No interactive request the
+  full policy admitted finished late, at 32 or 64 requests/s. The estimator is
+  accurate on what it lets in; the problem is what it keeps out.
+- **The missing piece is class priority.** Deficit round robin shares capacity
+  by tenant, and nothing puts a 3-second interactive request ahead of a
+  20-second batch one. That is the design change this run argues for.
+
+### Other things the GPU showed
+
+- **The second engine never paid for itself on one GPU.** Two engines contend
+  for the same SMs. Below the knee they doubled time between tokens (4.9 to
+  10.5 ms) for no goodput gain, and past it round robin across two engines stays
+  below a single engine at every rate. The policy comparisons above are all
+  two-engine; whether the full policy does better still on one engine is untested.
+- **The engines were not equal.** The second sized its KV cache from the memory
+  the first left free: 59,776 tokens against 49,904.
+- **vLLM merges tokens under load.** Counting streamed chunks undercounted
+  2.4% of requests in the unqueued configurations at 32 to 64 requests/s, by 1
+  to 23 tokens, median 2. Goodput and time to first token do not depend on the count; time
+  between tokens for those requests is slightly inflated. The client now reads
+  the exact count from vLLM's final usage chunk.
 - **Prefix-cache hits were not measured on this path.** vLLM reports them as an
-  engine-wide counter, not per request, so the analysis prints n/a rather than
-  the zero it printed at first.
+  engine-wide counter, not per request, so the analysis prints n/a.
 
 ## Results, simulated backend
 
@@ -248,11 +285,12 @@ go run ./cmd/router -mode full \
 
 ## Next
 
-1. Rerun on the 4090 at rates that saturate one engine, which the first GPU
-   run never reached: `RATES="32 48 64" ./gpu/run_on_4090.sh`. That is where the
-   second engine, the placement policy and admission control can actually
-   differ, or be shown not to.
-2. Read vLLM's engine-wide prefix-cache counters before and after each run, so
+1. Class priority: put interactive requests ahead of batch requests inside each
+   tenant's share, then rerun 32 to 64 requests/s and check whether interactive
+   goodput recovers without giving back the batch gain.
+2. Make admission less conservative near the knee, where FIFO still wins at
+   32 requests/s, and measure what that costs deeper past it.
+3. Run the full policy on a single engine, since the second engine never paid
+   for itself on one GPU.
+4. Read vLLM's engine-wide prefix-cache counters before and after each run, so
    prefix-aware placement can be judged on hardware.
-3. Work out whether deadline admission earns its complexity over FIFO plus
-   expiry-on-dispatch at overload, and if it does not, say so here.

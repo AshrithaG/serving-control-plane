@@ -11,7 +11,8 @@ it actually buy?
 
 **State.** Measured on real hardware: two vLLM 0.28.0 engines serving
 Qwen3-1.7B on one RTX 4090, six offered rates from well below to four times past
-saturation, three seeds each, 118,722 requests with zero errors. The simulated
+saturation, three seeds each, across three runs: 193,249 requests with zero
+errors. The simulated
 results are kept further down as the record of how the policies were developed;
 where they disagree with the GPU, the GPU is right.
 
@@ -106,9 +107,45 @@ The headline number needs this table beside it:
 - **What admission control admits, it delivers.** No interactive request the
   full policy admitted finished late, at 32 or 64 requests/s. The estimator is
   accurate on what it lets in; the problem is what it keeps out.
-- **The missing piece is class priority.** Deficit round robin shares capacity
-  by tenant, and nothing puts a 3-second interactive request ahead of a
-  20-second batch one. That is the design change this run argues for.
+- **The missing piece was class priority.** Deficit round robin shares capacity
+  by tenant, and nothing put a 3-second interactive request ahead of a
+  20-second batch one. The next section tests exactly that change.
+
+### Deadline ordering on the GPU
+
+The `edf` policy (below, under "Deadline ordering, in simulation") was run on
+the same card at 32 to 64 requests/s, three seeds, 74,527 requests, zero errors,
+every token count exact. FIFO and `full` were rerun alongside it and reproduced
+the previous run to within 2%. Medians of three seeds; raw records in
+`results/gpu-20260921-2251/`.
+
+| offered | policy | goodput, requests/s | goodput, tokens/s | interactive met | batch met | TTFT p50 |
+|---|---|---|---|---|---|---|
+| 32 | fifo | 9.62 | **3,286** | 6.8% | 93.5% | 6.7s |
+| 32 | full | 8.25 | 2,806 | 4.5% | 81.6% | 1.4s |
+| 32 | edf | **12.43** | 2,358 | **32.8%** | 56.2% | 0.9s |
+| 48 | fifo | 5.15 | 1,615 | 3.8% | 29.5% | 15.4s |
+| 48 | full | 7.10 | 2,524 | 2.5% | 47.6% | 2.5s |
+| 48 | edf | **14.86** | 2,519 | **30.4%** | 39.1% | 1.4s |
+| 64 | fifo | 4.25 | 1,264 | 2.7% | 17.3% | 19.3s |
+| 64 | full | 7.19 | 2,520 | 1.7% | 36.2% | 3.8s |
+| 64 | edf | **13.75** | 2,486 | **19.9%** | 27.7% | 1.6s |
+
+- **Deep past saturation it is close to free.** At 48 and 64 requests/s `edf`
+  delivers the same tokens on time as `full`, within the spread between seeds
+  (2,363 to 2,674 against 2,453 to 2,630 at 64), while meeting the deadline for
+  about twelve times as many interactive requests.
+- **Near the knee it is a real trade.** At 32 requests/s `edf` gives up 28% of
+  FIFO's on-time tokens to raise interactive requests met from 7% to 33%.
+- **The simulator overstated the cost.** It predicted `edf` would deliver 14%
+  fewer tokens on time deep past saturation; on the GPU the loss is inside the
+  noise. The likely reason is that continuous batching lets vLLM decode short
+  requests alongside long ones instead of in place of them, which the simulated
+  engine does not model; that is a hypothesis, not something this run measured.
+- **Interactive users are still mostly lost.** Even under `edf`, at most a third
+  of 3-second requests meet their deadline past saturation. Reordering the
+  router's queue cannot help a request stuck behind long batch requests already
+  running on the engine; that takes priority inside the engine itself.
 
 ### Other things the GPU showed
 
@@ -263,7 +300,8 @@ Read both goodput columns. `edf` nearly doubles goodput counted in requests and
 delivers 14% fewer tokens on time, because it spends capacity on short urgent
 requests instead of long ones. That is a trade between interactive users and
 batch throughput, not a free gain, and which side of it is right depends on
-what the operator is serving. The GPU run of `edf` is next.
+what the operator is serving. On the GPU the token cost deep past saturation
+turned out to be inside the noise; see "Deadline ordering on the GPU" above.
 
 ## What the backend is
 
@@ -309,12 +347,14 @@ go run ./cmd/router -mode full \
 
 ## Next
 
-1. Class priority: put interactive requests ahead of batch requests inside each
-   tenant's share, then rerun 32 to 64 requests/s and check whether interactive
-   goodput recovers without giving back the batch gain.
-2. Make admission less conservative near the knee, where FIFO still wins at
-   32 requests/s, and measure what that costs deeper past it.
-3. Run the full policy on a single engine, since the second engine never paid
-   for itself on one GPU.
+1. Priority inside the engine. vLLM supports priority scheduling; passing each
+   request's deadline through as its priority would let an interactive request
+   overtake batch requests already running, which reordering the router's queue
+   cannot do. The question is how much of the remaining two thirds of
+   interactive requests that recovers.
+2. Make admission less conservative near the knee, where FIFO still delivers
+   the most tokens at 32 requests/s.
+3. Run the policies on a single engine, since the second engine never paid for
+   itself on one GPU.
 4. Read vLLM's engine-wide prefix-cache counters before and after each run, so
    prefix-aware placement can be judged on hardware.

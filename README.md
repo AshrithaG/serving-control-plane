@@ -150,7 +150,7 @@ the previous run within 1% in five of six cells, and within 3.2% in the sixth
   router's queue cannot help a request stuck behind long batch requests already
   running on the engine; that takes priority inside the engine itself.
 
-### Engine priority and slot reservation: predicted, then measured
+### Engine priority, slot reservation, and the dispatch window
 
 `edf` still lost most interactive requests past saturation, so two changes were
 built against it and run on the same card, three seeds, 74,533 requests, zero
@@ -183,25 +183,47 @@ Medians of three seeds:
 rate, fewer batch, and fewer tokens delivered on time. It is the same trade as
 deadline ordering, moved further in the same direction.
 
-**`prio` did not, and the run cannot say why.** The prediction that priority
-would change nothing is supported by the engine logs, which record zero
-preemptions across the whole run: the KV cache never filled, so priority could
-only reorder a waiting queue. But `prio` also doubled the router's dispatch
-window, and its results moved a long way: the highest token throughput measured
-anywhere in this project (3,172 tokens/s at 64 requests/s, against FIFO's
-1,264), much better tail latency, and interactive requests down to 2%.
+**`prio` did nothing, and the dispatch window did everything.** The prediction
+was that priority would not matter, and the engine logs agreed: zero preemptions
+across the entire run, because the KV cache never filled. But `prio` also
+doubled the router's dispatch window, so its large effect could not be
+attributed. A control run of `edf` at the same window settles it.
 
-Two changes, one experiment, so the effect cannot be attributed. That is a
-mistake in the experiment design, not a finding, and it is mine: the dispatch
-window was widened to give vLLM's priority queue something to reorder, which
-made the comparison measure two things at once. The control that separates them
-is `edf` at the same window (`WINDOW=64 MODES=edf`), which is the next run.
+| offered | config | goodput, req/s | goodput, tok/s | interactive met | batch met | TTFT p95 |
+|---|---|---|---|---|---|---|
+| 32 | `edf`, window 32 | **12.47** | 2,387 | **32.6%** | 57.2% | 19.1s |
+| 32 | `edf`, window 64 | 8.75 | 3,035 | 4.5% | 84.8% | 6.1s |
+| 32 | `prio`, window 64 | 8.72 | 3,023 | 4.5% | 84.2% | 5.9s |
+| 48 | `edf`, window 32 | **13.55** | 2,535 | **26.0%** | 39.5% | 19.4s |
+| 48 | `edf`, window 64 | 9.05 | 3,202 | 2.8% | 60.4% | 9.6s |
+| 48 | `prio`, window 64 | 9.26 | 3,257 | 2.8% | 61.6% | 8.8s |
+| 64 | `edf`, window 32 | **13.27** | 2,489 | **19.1%** | 29.1% | 18.6s |
+| 64 | `edf`, window 64 | 9.25 | **3,344** | 2.0% | 46.3% | 12.3s |
+| 64 | `prio`, window 64 | 8.97 | 3,172 | 2.0% | 44.2% | 10.5s |
 
-What the number is worth in the meantime: something in that configuration
-delivers about 25% more on-time tokens than any policy measured so far, and
-the most likely cause is simply letting more work into the engine at once,
-where continuous batching is more efficient. That is a hypothesis with an
-obvious test attached, not a result.
+`edf` and `prio` at the same window agree within the spread between seeds on
+every metric at every rate. Priority is not doing anything here, as predicted.
+
+**What the window does is the real result.** Doubling it raises on-time tokens
+by 27 to 34%, and cuts interactive requests met from a third to one in twenty.
+The reason is that a control plane only schedules the work it is still holding.
+Widen the window and the queue moves inside vLLM, which serves it first come
+first served; deadline ordering in the router then has almost nothing left to
+order, and short urgent requests wait behind long ones. Throughput rises because
+larger batches are more efficient on the GPU.
+
+So the two knobs point in opposite directions, and which one is right depends on
+what is being served:
+
+- **Narrow window, deadline-ordered queue**: a third of interactive requests
+  met, 25% fewer tokens delivered on time.
+- **Wide window**: the highest throughput measured in this project, and
+  interactive traffic effectively abandoned.
+
+One caveat on the tail-latency column: time to first token is computed over
+requests that completed, and at the wide window most interactive requests were
+refused at admission, so the survivors are mostly batch requests that were
+dispatched immediately. Part of that improvement is selection, not speed.
 
 ### Other things the GPU showed
 
@@ -403,9 +425,10 @@ go run ./cmd/router -mode full \
 
 ## Next
 
-1. `edf` at a dispatch window of 64, to separate the window from priority in
-   the `prio` result above. One mode, three rates, three seeds, about 11
-   minutes on the card.
+1. Size the dispatch window per class rather than globally: hold interactive
+   work in the router where deadline order still applies, while letting batch
+   work queue inside the engine where larger batches pay. This run measured the
+   two extremes; nothing yet measures the middle.
 2. Make admission less conservative near the knee, where FIFO still delivers
    the most tokens at 32 requests/s.
 3. Run the policies on a single engine, since the second engine never paid for

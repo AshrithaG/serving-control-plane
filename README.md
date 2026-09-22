@@ -150,28 +150,58 @@ the previous run within 1% in five of six cells, and within 3.2% in the sixth
   router's queue cannot help a request stuck behind long batch requests already
   running on the engine; that takes priority inside the engine itself.
 
-### Engine priority and slot reservation: predictions, written before the run
+### Engine priority and slot reservation: predicted, then measured
 
-`edf` still loses two thirds of interactive requests past saturation. Two
-changes aimed at that are built and waiting for the GPU:
+`edf` still lost most interactive requests past saturation, so two changes were
+built against it and run on the same card, three seeds, 74,533 requests, zero
+errors, engines on `--scheduling-policy priority`. The predictions below were
+written and committed before the run.
 
-- **`prio`** passes each request's deadline to vLLM as its priority, with the
-  engines on `--scheduling-policy priority`, and lets twice the engines'
-  running slots through so vLLM has a queue of its own to reorder.
-  **Prediction: no measurable change from `edf`.** vLLM 0.28's scheduler
-  (`vllm/v1/core/sched/scheduler.py`) preempts a running request only when the
-  KV cache cannot fit a new one, and this workload uses about 7,000 of each
-  engine's 59,776 KV tokens. Short of that, priority only reorders requests
-  waiting for a slot, which is what `edf` already does in the router.
-- **`reserve`** caps batch requests at half the router's dispatch slots, so an
-  interactive request never waits for a slot held by a long batch request.
-  **Prediction: interactive requests met rise above `edf`'s and batch requests
-  met fall.** In the simulator at twice capacity it raised interactive from
-  60% to 68% met with batch unchanged; the GPU may not be as generous.
+- **`prio`** passes each request's deadline to vLLM as its priority and lets
+  twice the engines' running slots through, so vLLM has a queue of its own to
+  reorder. **Predicted: no measurable change from `edf`**, because vLLM 0.28
+  preempts only when the KV cache cannot fit a new request, and this workload
+  uses about 7,000 of each engine's 59,776 KV tokens.
+- **`reserve`** caps batch requests at half the router's dispatch slots.
+  **Predicted: interactive requests met rise, batch fall.**
 
-Both run in one session against `edf` as the control, with every engine on the
-priority policy, which is identical to FCFS for requests that carry no
-priority.
+Medians of three seeds:
+
+| offered | policy | goodput, req/s | goodput, tok/s | interactive met | batch met | TTFT p95 |
+|---|---|---|---|---|---|---|
+| 32 | edf | 12.47 | 2,387 | 32.6% | 57.2% | 19.1s |
+| 32 | prio | 8.72 | **3,023** | 4.5% | 84.2% | **5.9s** |
+| 32 | reserve | 12.05 | 1,923 | **37.8%** | 40.7% | 17.9s |
+| 48 | edf | 13.55 | 2,535 | 26.0% | 39.5% | 19.4s |
+| 48 | prio | 9.26 | **3,257** | 2.8% | 61.6% | **8.8s** |
+| 48 | reserve | 13.52 | 2,172 | **28.6%** | 29.1% | 13.7s |
+| 64 | edf | 13.27 | 2,489 | 19.1% | 29.1% | 18.6s |
+| 64 | prio | 8.97 | **3,172** | 2.0% | 44.2% | **10.5s** |
+| 64 | reserve | **15.58** | 2,143 | **27.7%** | 20.6% | 15.7s |
+
+**`reserve` came out as predicted.** More interactive requests met at every
+rate, fewer batch, and fewer tokens delivered on time. It is the same trade as
+deadline ordering, moved further in the same direction.
+
+**`prio` did not, and the run cannot say why.** The prediction that priority
+would change nothing is supported by the engine logs, which record zero
+preemptions across the whole run: the KV cache never filled, so priority could
+only reorder a waiting queue. But `prio` also doubled the router's dispatch
+window, and its results moved a long way: the highest token throughput measured
+anywhere in this project (3,172 tokens/s at 64 requests/s, against FIFO's
+1,264), much better tail latency, and interactive requests down to 2%.
+
+Two changes, one experiment, so the effect cannot be attributed. That is a
+mistake in the experiment design, not a finding, and it is mine: the dispatch
+window was widened to give vLLM's priority queue something to reorder, which
+made the comparison measure two things at once. The control that separates them
+is `edf` at the same window (`WINDOW=64 MODES=edf`), which is the next run.
+
+What the number is worth in the meantime: something in that configuration
+delivers about 25% more on-time tokens than any policy measured so far, and
+the most likely cause is simply letting more work into the engine at once,
+where continuous batching is more efficient. That is a hypothesis with an
+obvious test attached, not a result.
 
 ### Other things the GPU showed
 
@@ -373,11 +403,9 @@ go run ./cmd/router -mode full \
 
 ## Next
 
-1. Priority inside the engine. vLLM supports priority scheduling; passing each
-   request's deadline through as its priority would let an interactive request
-   overtake batch requests already running, which reordering the router's queue
-   cannot do. The question is how much of the remaining two thirds of
-   interactive requests that recovers.
+1. `edf` at a dispatch window of 64, to separate the window from priority in
+   the `prio` result above. One mode, three rates, three seeds, about 11
+   minutes on the card.
 2. Make admission less conservative near the knee, where FIFO still delivers
    the most tokens at 32 requests/s.
 3. Run the policies on a single engine, since the second engine never paid for

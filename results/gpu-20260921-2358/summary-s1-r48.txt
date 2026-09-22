@@ -1,0 +1,8 @@
+     policy      offered      met_slo         shed       errors  goodput_rps  goodput_tok_s     ttft_p50     ttft_p95     ttft_p99      tbt_p50      e2e_p95   prefix_hit         jain  interactive_met    batch_met
+   edf              2839          742         1965            0        12.37         2461         1667        19314        19964         11.3        23698          nan        0.707        21.2%        38.4%
+   prio             2841          556         2193            0         9.27         3255         9958        18289        19342         11.4        22662          nan        0.643         2.8%        61.2%
+   reserve          2839          556         2192            0         9.27         3255        10021        18177        19212         11.4        22526          nan        0.643         2.8%        61.2%
+
+edf: offered=47.3/s over 60.0s, drained in 76.0s, tenant tokens={'globex': 26304, 'acme': 121344} share={'globex': '0.18', 'acme': '0.82'}, shed={'projected completion past deadline': 1891, 'deadline passed while queued': 74}
+prio: offered=47.4/s over 60.0s, drained in 83.0s, tenant tokens={'globex': 24832, 'acme': 170432} share={'globex': '0.13', 'acme': '0.87'}, shed={'deadline passed while queued': 2193}
+reserve: offered=47.3/s over 60.0s, drained in 82.9s, tenant tokens={'globex': 24832, 'acme': 170432} share={'globex': '0.13', 'acme': '0.87'}, shed={'deadline passed while queued': 2192}

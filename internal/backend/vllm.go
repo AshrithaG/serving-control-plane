@@ -20,8 +20,8 @@ import (
 // Model is the served model name vLLM expects in each request.
 var Model = "Qwen/Qwen3-1.7B"
 
-func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens int) (Result, error) {
-	body, _ := json.Marshal(map[string]any{
+func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens int, priority *int64) (Result, error) {
+	payload := map[string]any{
 		"model": Model, "prompt": prompt, "max_tokens": maxTokens,
 		"stream": true, "temperature": 0,
 		// Under load vLLM can merge several tokens into one streamed chunk, so
@@ -32,7 +32,13 @@ func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens
 		// Without this, a short answer ends early and the request costs less
 		// than the router budgeted, which quietly flatters every policy.
 		"ignore_eos": true,
-	})
+	}
+	if priority != nil {
+		// Lower is served first, and the engine must run with
+		// --scheduling-policy priority or it rejects a non-zero value.
+		payload["priority"] = *priority
+	}
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.URL+"/v1/completions", bytes.NewReader(body))
 	if err != nil {
 		return Result{}, err

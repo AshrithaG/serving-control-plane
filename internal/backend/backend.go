@@ -161,12 +161,18 @@ type Result struct {
 // arrived. Time to first token is measured at the router, not at the engine,
 // so queueing inside the engine is included where it belongs.
 func (r *Replica) Generate(ctx context.Context, id, prompt string, maxTokens int) (Result, error) {
+	return r.GenerateWithPriority(ctx, id, prompt, maxTokens, nil)
+}
+
+// GenerateWithPriority is Generate with an engine-side priority, used only on
+// the vLLM protocol; the simulated engine has no priority scheduler.
+func (r *Replica) GenerateWithPriority(ctx context.Context, id, prompt string, maxTokens int, priority *int64) (Result, error) {
 	if r.Protocol == "vllm" {
 		r.mu.Lock()
 		r.inflight++
 		r.outstanding += int64(maxTokens)
 		r.mu.Unlock()
-		res, err := r.generateVLLM(ctx, id, prompt, maxTokens)
+		res, err := r.generateVLLM(ctx, id, prompt, maxTokens, priority)
 		r.mu.Lock()
 		r.inflight--
 		r.outstanding -= int64(maxTokens - res.OutTokens)

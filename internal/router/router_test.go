@@ -11,8 +11,10 @@ import (
 
 	"github.com/AshrithaG/serving-control-plane/internal/admission"
 	"github.com/AshrithaG/serving-control-plane/internal/backend"
+	"github.com/AshrithaG/serving-control-plane/internal/fairness"
 	"github.com/AshrithaG/serving-control-plane/internal/placement"
 	"github.com/AshrithaG/serving-control-plane/internal/record"
+	"github.com/AshrithaG/serving-control-plane/internal/types"
 )
 
 // A backend failure must reach the client as a failure. The first version of
@@ -38,5 +40,24 @@ func TestUnqueuedPathReportsBackendFailure(t *testing.T) {
 	rt.Handle(w, httptest.NewRequest(http.MethodPost, "/generate", bytes.NewReader(body)))
 	if w.Code == http.StatusOK {
 		t.Fatal("router answered 200 for a request its backend refused")
+	}
+}
+
+// Reserve mode must refuse a batch request once batch work holds its share of
+// dispatch slots, and must still let an interactive request through.
+func TestReserveCapsBatchButNotInteractive(t *testing.T) {
+	rt := New(Config{Mode: Reserve, MaxInflight: 8, BatchShare: 0.5, Quantum: 256})
+	batch := fairness.Item{Value: &queued{req: types.Request{Class: types.Batch}}}
+	interactive := fairness.Item{Value: &queued{req: types.Request{Class: types.Interactive}}}
+	rt.batchInflight.Store(3)
+	if !rt.withinBatchShare(batch) {
+		t.Fatal("refused a batch request with 3 of its 4 slots in use")
+	}
+	rt.batchInflight.Store(4)
+	if rt.withinBatchShare(batch) {
+		t.Fatal("admitted a batch request past its share of dispatch slots")
+	}
+	if !rt.withinBatchShare(interactive) {
+		t.Fatal("the batch cap blocked an interactive request")
 	}
 }

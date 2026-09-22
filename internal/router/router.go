@@ -43,7 +43,19 @@ const (
 	// nearly every 3-second request: it charged them for queued batch work
 	// they would never actually have waited behind.
 	EDF Mode = "edf"
+	// Prio is EDF that also hands each request's deadline to vLLM as its
+	// priority, so the engine orders its own waiting queue the same way. vLLM
+	// 0.28 only preempts a running request when the KV cache is full, so the
+	// prediction, written before the GPU run, is that this matches EDF.
+	Prio Mode = "prio"
+	// Reserve is EDF with batch requests capped at a share of dispatch slots,
+	// so a short interactive request is not left waiting for a slot held by a
+	// long batch request. That wait is what EDF alone cannot remove.
+	Reserve Mode = "reserve"
 )
+
+// deadlineOrdered reports whether a mode queues and admits by deadline.
+func deadlineOrdered(m Mode) bool { return m == EDF || m == Prio || m == Reserve }
 
 type Config struct {
 	Mode        Mode
@@ -54,6 +66,9 @@ type Config struct {
 	Weights     map[string]float64
 	MaxInflight int
 	Records     *record.Writer
+	// BatchShare is the fraction of dispatch slots batch requests may hold at
+	// once in Reserve mode.
+	BatchShare float64
 }
 
 type queued struct {
@@ -74,6 +89,7 @@ type Router struct {
 	queuedTokens  float64
 	admitted      atomic.Int64
 	shed          atomic.Int64
+	batchInflight atomic.Int64
 	completed     atomic.Int64
 	failed        atomic.Int64
 	expiredInLine atomic.Int64
@@ -92,7 +108,7 @@ func New(cfg Config) *Router {
 	for t, w := range cfg.Weights {
 		rt.drr.SetWeight(t, w)
 	}
-	rt.drr.OrderByDeadline(cfg.Mode == EDF)
+	rt.drr.OrderByDeadline(deadlineOrdered(cfg.Mode))
 	return rt
 }
 
@@ -149,7 +165,7 @@ func (rt *Router) Handle(w http.ResponseWriter, r *http.Request) {
 	// replica this request would actually land on.
 	rep := rt.cfg.Placement.Pick(r.Context(), rt.cfg.Pool, req)
 	load := rt.load(r.Context())
-	if rt.cfg.Mode == EDF {
+	if deadlineOrdered(rt.cfg.Mode) {
 		load.QueuedTokens = rt.drr.CostAhead(req.Deadline(arrival))
 	}
 	d := rt.cfg.Admission.Decide(rep, load, req, 0)
@@ -205,20 +221,53 @@ func (rt *Router) Run(ctx context.Context) {
 			default:
 				goto full
 			}
-			it, ok := rt.drr.Pop()
+			var it fairness.Item
+			var ok bool
+			if rt.cfg.Mode == Reserve {
+				it, ok = rt.drr.PopEligible(rt.withinBatchShare)
+			} else {
+				it, ok = rt.drr.Pop()
+			}
 			if !ok {
 				<-rt.slots
 				break
 			}
 			q := it.Value.(*queued)
 			rt.queued_(-it.Cost)
+			batch := q.req.Class == types.Batch
+			if batch {
+				rt.batchInflight.Add(1)
+			}
 			go func() {
-				defer func() { <-rt.slots }()
+				defer func() {
+					if batch {
+						rt.batchInflight.Add(-1)
+					}
+					<-rt.slots
+				}()
 				rt.serve(ctx, q)
 			}()
 		}
 	full:
 	}
+}
+
+// withinBatchShare admits interactive work always and batch work only while
+// batch requests hold less than their share of dispatch slots.
+func (rt *Router) withinBatchShare(it fairness.Item) bool {
+	q := it.Value.(*queued)
+	if q.req.Class != types.Batch {
+		return true
+	}
+	share := rt.cfg.BatchShare
+	if share <= 0 || share > 1 {
+		share = 0.5
+	}
+	limit := int64(share * float64(rt.cfg.MaxInflight))
+	if limit < 1 {
+		limit = 1
+	}
+	return rt.batchInflight.Load() < limit
 }
 
 // serve runs one admitted request. A request whose deadline passed while it
@@ -240,7 +289,13 @@ func (rt *Router) serve(ctx context.Context, q *queued) {
 	q.rec.Replica = rep.Name
 	q.rec.DispatchMS = rt.cfg.Records.Since(now)
 
-	res, err := rep.Generate(ctx, q.req.ID, q.req.Prompt, q.req.MaxTokens)
+	var prio *int64
+	if rt.cfg.Mode == Prio {
+		// Earlier deadline, lower number, served first by the engine.
+		p := q.req.Deadline(q.arrival).UnixMilli()
+		prio = &p
+	}
+	res, err := rep.GenerateWithPriority(ctx, q.req.ID, q.req.Prompt, q.req.MaxTokens, prio)
 	if err != nil {
 		rt.failed.Add(1)
 		q.rec.Error = err.Error()
@@ -296,5 +351,6 @@ func (rt *Router) Stats(w http.ResponseWriter, _ *http.Request) {
 		"failed":          rt.failed.Load(),
 		"queued_requests": rt.drr.Len(),
 		"queued_tokens":   rt.QueuedTokens(),
+		"batch_inflight":  rt.batchInflight.Load(),
 	})
 }

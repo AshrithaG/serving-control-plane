@@ -24,6 +24,11 @@ func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens
 	body, _ := json.Marshal(map[string]any{
 		"model": Model, "prompt": prompt, "max_tokens": maxTokens,
 		"stream": true, "temperature": 0,
+		// Under load vLLM can merge several tokens into one streamed chunk, so
+		// counting chunks undercounts tokens: the 2026-09-21 saturation run saw
+		// 2.4% of unqueued requests short by 1 to 23 tokens. The final usage chunk
+		// carries the exact count.
+		"stream_options": map[string]any{"include_usage": true},
 		// Without this, a short answer ends early and the request costs less
 		// than the router budgeted, which quietly flatters every policy.
 		"ignore_eos": true,
@@ -45,6 +50,7 @@ func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens
 	}
 
 	var res Result
+	exact := 0
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -60,8 +66,17 @@ func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens
 			Choices []struct {
 				Text string `json:"text"`
 			} `json:"choices"`
+			Usage *struct {
+				CompletionTokens int `json:"completion_tokens"`
+			} `json:"usage"`
 		}
-		if json.Unmarshal([]byte(payload), &chunk) != nil || len(chunk.Choices) == 0 {
+		if json.Unmarshal([]byte(payload), &chunk) != nil {
+			continue
+		}
+		if chunk.Usage != nil && chunk.Usage.CompletionTokens > 0 {
+			exact = chunk.Usage.CompletionTokens
+		}
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 		// One streamed chunk is one decode step for a single sequence, which
@@ -79,6 +94,12 @@ func (r *Replica) generateVLLM(ctx context.Context, id, prompt string, maxTokens
 	}
 	if res.OutTokens == 0 {
 		return res, fmt.Errorf("vllm %s: no tokens", r.Name)
+	}
+	if exact > res.OutTokens {
+		// Token debt was paid down once per chunk; pay the merged tokens too, or
+		// the router believes the replica still owes work it has finished.
+		r.addOutstanding(-int64(exact - res.OutTokens))
+		res.OutTokens = exact
 	}
 	r.observe(len(prompt)/4+1, res.OutTokens, res.FirstToken.Sub(start), res.LastToken.Sub(res.FirstToken))
 	return res, nil

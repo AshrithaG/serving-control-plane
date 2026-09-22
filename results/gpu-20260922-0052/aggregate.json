@@ -1,0 +1,344 @@
+{
+ "32-edf": [
+  {
+   "offered": 1880,
+   "met_slo": 774,
+   "goodput_rps": 12.903526318684124,
+   "goodput_tok_s": 2623.650333241903,
+   "interactive_met": 0.32611940298507464,
+   "batch_met": 0.6240740740740741,
+   "ttft_p50": 771.8279999999995,
+   "ttft_p95": 19457.66465,
+   "shed": 998,
+   "completed": 882
+  },
+  {
+   "offered": 1896,
+   "met_slo": 712,
+   "goodput_rps": 11.86882580389416,
+   "goodput_tok_s": 2215.869770309049,
+   "interactive_met": 0.325909428359317,
+   "batch_met": 0.4972677595628415,
+   "ttft_p50": 1059.4000000000015,
+   "ttft_p95": 19102.161000000004,
+   "shed": 1019,
+   "completed": 877
+  },
+  {
+   "offered": 1761,
+   "met_slo": 748,
+   "goodput_rps": 12.465002588821061,
+   "goodput_tok_s": 2386.8813513395967,
+   "interactive_met": 0.3629032258064516,
+   "batch_met": 0.5719769673704415,
+   "ttft_p50": 780.4249999999993,
+   "ttft_p95": 18917.755,
+   "shed": 870,
+   "completed": 891
+  }
+ ],
+ "32-prio": [
+  {
+   "offered": 1881,
+   "met_slo": 492,
+   "goodput_rps": 8.199077603769576,
+   "goodput_tok_s": 2876.4763964054046,
+   "interactive_met": 0.03803131991051454,
+   "batch_met": 0.8166666666666667,
+   "ttft_p50": 3264.5190000000002,
+   "ttft_p95": 6429.551350000001,
+   "shed": 1389,
+   "completed": 492
+  },
+  {
+   "offered": 1896,
+   "met_slo": 523,
+   "goodput_rps": 8.718500603268563,
+   "goodput_tok_s": 3022.5024500570357,
+   "interactive_met": 0.04528582034149963,
+   "batch_met": 0.8415300546448088,
+   "ttft_p50": 2971.596000000005,
+   "ttft_p95": 5891.486299999996,
+   "shed": 1373,
+   "completed": 523
+  },
+  {
+   "offered": 1761,
+   "met_slo": 543,
+   "goodput_rps": 9.04850639321136,
+   "goodput_tok_s": 3032.032845778257,
+   "interactive_met": 0.06693548387096775,
+   "batch_met": 0.8829174664107485,
+   "ttft_p50": 2621.4069999999992,
+   "ttft_p95": 5765.713400000001,
+   "shed": 1218,
+   "completed": 543
+  }
+ ],
+ "32-reserve": [
+  {
+   "offered": 1880,
+   "met_slo": 882,
+   "goodput_rps": 14.702430066649516,
+   "goodput_tok_s": 2157.1565420237876,
+   "interactive_met": 0.4880597014925373,
+   "batch_met": 0.4222222222222222,
+   "ttft_p50": 265.1140000000014,
+   "ttft_p95": 18834.510150000002,
+   "shed": 932,
+   "completed": 948
+  },
+  {
+   "offered": 1897,
+   "met_slo": 723,
+   "goodput_rps": 12.045863249795632,
+   "goodput_tok_s": 1922.5397678014074,
+   "interactive_met": 0.37611275964391694,
+   "batch_met": 0.39344262295081966,
+   "ttft_p50": 225.46199999999953,
+   "ttft_p95": 17892.072999999997,
+   "shed": 1096,
+   "completed": 801
+  },
+  {
+   "offered": 1761,
+   "met_slo": 681,
+   "goodput_rps": 11.34564440711211,
+   "goodput_tok_s": 1856.354012361321,
+   "interactive_met": 0.3782258064516129,
+   "batch_met": 0.4069097888675624,
+   "ttft_p50": 295.95550000000003,
+   "ttft_p95": 17921.12635,
+   "shed": 1003,
+   "completed": 758
+  }
+ ],
+ "48-edf": [
+  {
+   "offered": 2839,
+   "met_slo": 767,
+   "goodput_rps": 12.781181621407372,
+   "goodput_tok_s": 2535.039892700731,
+   "interactive_met": 0.2198616600790514,
+   "batch_met": 0.3950920245398773,
+   "ttft_p50": 1691.6395000000002,
+   "ttft_p95": 19405.133449999998,
+   "shed": 1949,
+   "completed": 890
+  },
+  {
+   "offered": 2822,
+   "met_slo": 813,
+   "goodput_rps": 13.54714855101582,
+   "goodput_tok_s": 2456.0163828183563,
+   "interactive_met": 0.2602324406265791,
+   "batch_met": 0.3534994068801898,
+   "ttft_p50": 1307.875,
+   "ttft_p95": 19501.3952,
+   "shed": 1869,
+   "completed": 953
+  },
+  {
+   "offered": 2653,
+   "met_slo": 918,
+   "goodput_rps": 15.309201595619047,
+   "goodput_tok_s": 2751.5204680439842,
+   "interactive_met": 0.316928069226609,
+   "batch_met": 0.4129353233830846,
+   "ttft_p50": 1100.6870000000017,
+   "ttft_p95": 18414.836,
+   "shed": 1642,
+   "completed": 1011
+  }
+ ],
+ "48-prio": [
+  {
+   "offered": 2839,
+   "met_slo": 543,
+   "goodput_rps": 9.051891090913744,
+   "goodput_tok_s": 3257.213819587142,
+   "interactive_met": 0.020256916996047432,
+   "batch_met": 0.6159509202453988,
+   "ttft_p50": 4674.863999999994,
+   "ttft_p95": 8442.696000000004,
+   "shed": 2296,
+   "completed": 543
+  },
+  {
+   "offered": 2822,
+   "met_slo": 565,
+   "goodput_rps": 9.416475512213768,
+   "goodput_tok_s": 3322.5992179025434,
+   "interactive_met": 0.027791814047498736,
+   "batch_met": 0.604982206405694,
+   "ttft_p50": 5082.570000000001,
+   "ttft_p95": 9232.328599999997,
+   "shed": 2257,
+   "completed": 565
+  },
+  {
+   "offered": 2655,
+   "met_slo": 555,
+   "goodput_rps": 9.255438032616064,
+   "goodput_tok_s": 3239.2365467663863,
+   "interactive_met": 0.031874662344678555,
+   "batch_met": 0.6169154228855721,
+   "ttft_p50": 4168.349000000002,
+   "ttft_p95": 8768.429899999996,
+   "shed": 2100,
+   "completed": 555
+  }
+ ],
+ "48-reserve": [
+  {
+   "offered": 2840,
+   "met_slo": 728,
+   "goodput_rps": 12.135821783590059,
+   "goodput_tok_s": 2168.9780822891066,
+   "interactive_met": 0.23061728395061729,
+   "batch_met": 0.3202453987730061,
+   "ttft_p50": 1574.656500000001,
+   "ttft_p95": 13743.30175,
+   "shed": 2084,
+   "completed": 756
+  },
+  {
+   "offered": 2821,
+   "met_slo": 811,
+   "goodput_rps": 13.518182730859932,
+   "goodput_tok_s": 2171.9769205449725,
+   "interactive_met": 0.2861476238624874,
+   "batch_met": 0.29062870699881377,
+   "ttft_p50": 1502.893,
+   "ttft_p95": 15323.651199999997,
+   "shed": 1971,
+   "completed": 850
+  },
+  {
+   "offered": 2655,
+   "met_slo": 1094,
+   "goodput_rps": 18.24491946535782,
+   "goodput_tok_s": 2357.763925351396,
+   "interactive_met": 0.4705564559697461,
+   "batch_met": 0.277363184079602,
+   "ttft_p50": 419.20099999999957,
+   "ttft_p95": 10227.4643,
+   "shed": 1525,
+   "completed": 1130
+  }
+ ],
+ "64-edf": [
+  {
+   "offered": 3740,
+   "met_slo": 796,
+   "goodput_rps": 13.265890833151108,
+   "goodput_tok_s": 2640.9122173171572,
+   "interactive_met": 0.17325800376647835,
+   "batch_met": 0.3096774193548387,
+   "ttft_p50": 1729.7489999999998,
+   "ttft_p95": 18447.95045,
+   "shed": 2826,
+   "completed": 914
+  },
+  {
+   "offered": 3707,
+   "met_slo": 811,
+   "goodput_rps": 13.516384850042542,
+   "goodput_tok_s": 2475.681715369568,
+   "interactive_met": 0.19591993841416475,
+   "batch_met": 0.2723174030658251,
+   "ttft_p50": 1309.8560000000016,
+   "ttft_p95": 19494.3285,
+   "shed": 2740,
+   "completed": 967
+  },
+  {
+   "offered": 3544,
+   "met_slo": 782,
+   "goodput_rps": 13.039621690893766,
+   "goodput_tok_s": 2488.6668262436224,
+   "interactive_met": 0.19055308841340332,
+   "batch_met": 0.29053420805998126,
+   "ttft_p50": 1642.8180000000002,
+   "ttft_p95": 18643.657800000004,
+   "shed": 2604,
+   "completed": 940
+  }
+ ],
+ "64-prio": [
+  {
+   "offered": 3741,
+   "met_slo": 551,
+   "goodput_rps": 9.18462545705805,
+   "goodput_tok_s": 3324.2009930096997,
+   "interactive_met": 0.01430722891566265,
+   "batch_met": 0.4728110599078341,
+   "ttft_p50": 5922.600999999999,
+   "ttft_p95": 10529.489000000001,
+   "shed": 3190,
+   "completed": 551
+  },
+  {
+   "offered": 3706,
+   "met_slo": 538,
+   "goodput_rps": 8.967585545265539,
+   "goodput_tok_s": 3171.5249755924992,
+   "interactive_met": 0.019638043896804003,
+   "batch_met": 0.43913435527502254,
+   "ttft_p50": 7012.053,
+   "ttft_p95": 10756.161999999998,
+   "shed": 3168,
+   "completed": 538
+  },
+  {
+   "offered": 3544,
+   "met_slo": 523,
+   "goodput_rps": 8.719100458241243,
+   "goodput_tok_s": 3076.0586304990597,
+   "interactive_met": 0.020589422688736373,
+   "batch_met": 0.4423617619493908,
+   "ttft_p50": 6696.623,
+   "ttft_p95": 9888.624599999997,
+   "shed": 3021,
+   "completed": 523
+  }
+ ],
+ "64-reserve": [
+  {
+   "offered": 3740,
+   "met_slo": 776,
+   "goodput_rps": 12.93378752483858,
+   "goodput_tok_s": 2113.140873130328,
+   "interactive_met": 0.2015065913370998,
+   "batch_met": 0.22211981566820277,
+   "ttft_p50": 1373.298999999999,
+   "ttft_p95": 13358.922400000001,
+   "shed": 2931,
+   "completed": 809
+  },
+  {
+   "offered": 3708,
+   "met_slo": 935,
+   "goodput_rps": 15.579230802555328,
+   "goodput_tok_s": 2143.4355619686817,
+   "interactive_met": 0.27713625866050806,
+   "batch_met": 0.19369369369369369,
+   "ttft_p50": 990.7890000000002,
+   "ttft_p95": 16563.2281,
+   "shed": 2685,
+   "completed": 1023
+  },
+  {
+   "offered": 3544,
+   "met_slo": 950,
+   "goodput_rps": 15.839593668737674,
+   "goodput_tok_s": 2187.5312519351396,
+   "interactive_met": 0.2947113443681873,
+   "batch_met": 0.20618556701030927,
+   "ttft_p50": 767.3834999999999,
+   "ttft_p95": 15659.886950000002,
+   "shed": 2516,
+   "completed": 1028
+  }
+ ]
+}

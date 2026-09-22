@@ -118,6 +118,10 @@ for SEED in $SEEDS; do
       # mode keeps the queue in the router.
       INFLIGHT=$((2 * MAX_SEQS))
       if [ "$MODE" = prio ]; then INFLIGHT=$((4 * MAX_SEQS)); fi
+      # WINDOW overrides it for every mode, which is how the dispatch window is
+      # separated from the policy: prio changed both at once on 2026-09-22, so
+      # its result could not be attributed to priority.
+      if [ -n "${WINDOW:-}" ]; then INFLIGHT=$WINDOW; fi
       echo "=== $TAG ==="
       ./gpu/bin/router -addr 127.0.0.1:8080 -mode "$MODE" -protocol vllm \
         -model "$MODEL" -max-num-seqs "$MAX_SEQS" \

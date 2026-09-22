@@ -37,8 +37,8 @@ run_one() { # mode rate tag tenants
 
 case "$SCENARIO" in
 sweep)
-  for RATE in 4 8 14; do
-    for MODE in direct rr fifo full; do
+  for RATE in ${RATES:-4 8 14}; do
+    for MODE in ${MODES:-direct rr fifo full edf}; do
       echo "=== $MODE at ${RATE}/s ==="
       run_one "$MODE" "$RATE" "sweep-${RATE}-${MODE}" "acme=1,globex=1"
     done

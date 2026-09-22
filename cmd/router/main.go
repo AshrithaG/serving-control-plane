@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -75,11 +76,24 @@ func main() {
 	socket := flag.String("spiffe-socket", "", "SPIRE agent Workload API socket; enables mTLS to backends")
 	backendID := flag.String("backend-id", "", "SPIFFE ID every backend must present")
 	batchShare := flag.Float64("batch-share", 0.5, "reserve mode: share of dispatch slots batch requests may hold")
+	check := flag.Bool("check", false, "validate the flags and exit, without serving")
 	flag.Parse()
 	backend.Model = *model
 	backend.MaxRunningVLLM = *maxSeqs
 
 	m := router.Mode(*mode)
+	// An unknown mode used to fall through to the queued path and run as
+	// something else entirely, with nothing in the logs to say so. A GPU run
+	// on 2026-09-21 lost two of its three policies that way to stale binaries.
+	switch m {
+	case router.Direct, router.RoundRobin, router.FIFO, router.Full, router.EDF, router.Prio, router.Reserve:
+	default:
+		log.Fatalf("unknown mode %q: want direct, rr, fifo, full, edf, prio or reserve", *mode)
+	}
+	if *check {
+		fmt.Println("ok", m)
+		return
+	}
 	pl := placement.ByName(*place, *imbalance)
 	if m == router.Direct || m == router.RoundRobin {
 		// Neither baseline is allowed a smart placement policy: that is what

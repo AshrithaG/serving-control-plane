@@ -10,13 +10,17 @@ package fairness
 import (
 	"container/list"
 	"sync"
+	"time"
 )
 
 // Item is one queued request with the cost the scheduler should charge for it.
 type Item struct {
 	Tenant string
 	Cost   float64 // estimated service cost in tokens
-	Value  any
+	// Deadline orders a tenant's queue when deadline ordering is on. Zero
+	// means the item keeps arrival order.
+	Deadline time.Time
+	Value    any
 }
 
 type queue struct {
@@ -37,6 +41,22 @@ type DRR struct {
 	// quantum for this visit. Without it a weighted queue would be credited
 	// once per served item and weights would have no effect.
 	credited bool
+	// byDeadline orders each tenant's queue earliest deadline first instead of
+	// by arrival. Tenants still share capacity by weight; within a tenant's
+	// share, the request due soonest goes first.
+	byDeadline bool
+}
+
+// OrderByDeadline switches every tenant queue to earliest-deadline-first.
+//
+// Deadline order rather than a strict interactive-first rule: strict priority
+// starves batch work for as long as interactive work keeps arriving, while
+// deadline order puts a 3-second request ahead of a 20-second one and still
+// lets the batch request through once its own deadline is the nearest.
+func (d *DRR) OrderByDeadline(on bool) {
+	d.mu.Lock()
+	d.byDeadline = on
+	d.mu.Unlock()
 }
 
 func NewDRR(quantum float64) *DRR {
@@ -65,8 +85,40 @@ func (d *DRR) Push(it Item) {
 		d.queues[it.Tenant] = q
 		d.order = append(d.order, it.Tenant)
 	}
+	if d.byDeadline && !it.Deadline.IsZero() {
+		// Insert before the first item due later, so equal deadlines keep
+		// arrival order.
+		for e := q.items.Front(); e != nil; e = e.Next() {
+			other := e.Value.(Item)
+			if !other.Deadline.IsZero() && other.Deadline.After(it.Deadline) {
+				q.items.InsertBefore(it, e)
+				d.n++
+				return
+			}
+		}
+	}
 	q.items.PushBack(it)
 	d.n++
+}
+
+// CostAhead is the queued work due before the given deadline, across every
+// tenant. Under deadline ordering that is the work an arriving request actually
+// waits behind; charging it for everything in the queue, including batch work
+// due much later, is what made admission control refuse interactive requests
+// that would have finished in time.
+func (d *DRR) CostAhead(deadline time.Time) float64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	total := 0.0
+	for _, q := range d.queues {
+		for e := q.items.Front(); e != nil; e = e.Next() {
+			it := e.Value.(Item)
+			if !it.Deadline.IsZero() && it.Deadline.Before(deadline) {
+				total += it.Cost
+			}
+		}
+	}
+	return total
 }
 
 func (d *DRR) Len() int {

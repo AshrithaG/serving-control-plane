@@ -59,7 +59,7 @@ func parseWeights(s string) map[string]float64 {
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
-	mode := flag.String("mode", "full", "direct | rr | fifo | full")
+	mode := flag.String("mode", "full", "direct | rr | fifo | full | edf")
 	backends := flag.String("backends", "r0=http://127.0.0.1:8100", "name=url pairs")
 	place := flag.String("placement", "prefix-affinity", "round-robin | least-loaded | prefix-affinity")
 	imbalance := flag.Int("imbalance", 2, "in-flight gap at which prefix affinity gives way to load")
@@ -86,7 +86,7 @@ func main() {
 		pl = placement.ByName("round-robin", 0)
 	}
 	adm := &admission.Controller{Mode: admission.Mode(*admit), Safety: *safety}
-	if m != router.Full {
+	if m != router.Full && m != router.EDF {
 		adm.Mode = admission.Off
 	}
 

@@ -37,6 +37,12 @@ const (
 	// Full is the policy under test: per-tenant deficit round robin, deadline
 	// admission control, prefix-aware placement, and shedding.
 	Full Mode = "full"
+	// EDF is Full with each tenant's queue in deadline order, and admission
+	// that charges an arriving request only for queued work due before it.
+	// It exists because the 2026-09-21 saturation run showed Full refusing
+	// nearly every 3-second request: it charged them for queued batch work
+	// they would never actually have waited behind.
+	EDF Mode = "edf"
 )
 
 type Config struct {
@@ -86,6 +92,7 @@ func New(cfg Config) *Router {
 	for t, w := range cfg.Weights {
 		rt.drr.SetWeight(t, w)
 	}
+	rt.drr.OrderByDeadline(cfg.Mode == EDF)
 	return rt
 }
 
@@ -141,7 +148,11 @@ func (rt *Router) Handle(w http.ResponseWriter, r *http.Request) {
 	// Admission is a decision about the system, so it is made against the
 	// replica this request would actually land on.
 	rep := rt.cfg.Placement.Pick(r.Context(), rt.cfg.Pool, req)
-	d := rt.cfg.Admission.Decide(rep, rt.load(r.Context()), req, 0)
+	load := rt.load(r.Context())
+	if rt.cfg.Mode == EDF {
+		load.QueuedTokens = rt.drr.CostAhead(req.Deadline(arrival))
+	}
+	d := rt.cfg.Admission.Decide(rep, load, req, 0)
 	if !d.Admit {
 		rt.shed.Add(1)
 		rec.Shed = true
@@ -163,7 +174,7 @@ func (rt *Router) Handle(w http.ResponseWriter, r *http.Request) {
 	if rt.cfg.Mode == FIFO {
 		tenant = "all" // one queue: the point of the FIFO baseline
 	}
-	rt.drr.Push(fairness.Item{Tenant: tenant, Cost: cost, Value: q})
+	rt.drr.Push(fairness.Item{Tenant: tenant, Cost: cost, Deadline: req.Deadline(arrival), Value: q})
 	select {
 	case rt.notify <- struct{}{}:
 	default:

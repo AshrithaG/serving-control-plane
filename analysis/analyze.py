@@ -73,6 +73,13 @@ def summarize(path, window_s=None):
     for r in met:
         by_tenant[r["tenant"]] = by_tenant.get(r["tenant"], 0) + r.get("out_tokens", 0)
 
+    # Goodput by class. The saturation run showed that one aggregate number can
+    # hide a policy that serves batch work and loses every interactive user.
+    def met_share(cls):
+        offered = [r for r in rows if r.get("class") == cls]
+        ok = [r for r in met if r.get("class") == cls]
+        return len(ok) / len(offered) if offered else float("nan")
+
     reasons = {}
     for r in shed:
         reasons[r.get("shed_reason", "?")] = reasons.get(r.get("shed_reason", "?"), 0) + 1
@@ -87,6 +94,10 @@ def summarize(path, window_s=None):
         "met_slo": len(met),
         "goodput_rps": len(met) / span if span else float("nan"),
         "offered_rps": len(rows) / offered_span if offered_span else float("nan"),
+        # Goodput in tokens as well as requests. Counting requests rewards any
+        # policy that favours short requests, whether or not it delivers more
+        # work; the two together say which one it is.
+        "goodput_tok_s": sum(r.get("out_tokens", 0) for r in met) / span if span else float("nan"),
         "drain_s": drain_span,
         "ttft_p50": pct(ttft, 50), "ttft_p95": pct(ttft, 95), "ttft_p99": pct(ttft, 99),
         "tbt_p50": pct(tbt, 50), "tbt_p95": pct(tbt, 95),
@@ -98,6 +109,8 @@ def summarize(path, window_s=None):
                        if done and any(r.get("prefix_hit") for r in done) else float("nan")),
         "tenant_tokens": by_tenant,
         "jain": jain(list(by_tenant.values())),
+        "interactive_met": met_share("interactive"),
+        "batch_met": met_share("batch"),
         "shed_reasons": reasons,
         "window_s": span,
         "tenant_share": {k: v / sum(by_tenant.values()) for k, v in by_tenant.items()} if by_tenant else {},
@@ -108,9 +121,10 @@ def main(paths):
     rows = [summarize(p) for p in paths]
     cols = [
         ("policy", "{:<8}"), ("offered", "{:>7}"), ("met_slo", "{:>7}"), ("shed", "{:>5}"),
-        ("errors", "{:>6}"), ("goodput_rps", "{:>11.2f}"), ("ttft_p50", "{:>8.0f}"),
+        ("errors", "{:>6}"), ("goodput_rps", "{:>11.2f}"), ("goodput_tok_s", "{:>9.0f}"), ("ttft_p50", "{:>8.0f}"),
         ("ttft_p95", "{:>8.0f}"), ("ttft_p99", "{:>8.0f}"), ("tbt_p50", "{:>7.1f}"),
         ("e2e_p95", "{:>8.0f}"), ("prefix_hit", "{:>10.2f}"), ("jain", "{:>5.3f}"),
+        ("interactive_met", "{:>6.1%}"), ("batch_met", "{:>6.1%}"),
     ]
     head = "  ".join(name.rjust(len(fmt.format(0 if ":" in fmt and "f" in fmt else 0).strip()) if False else max(len(name), 5)) for name, fmt in cols)
     print("  ".join(f"{name:>11}" for name, _ in cols))

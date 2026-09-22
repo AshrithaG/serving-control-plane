@@ -49,6 +49,7 @@ MODEL=${MODEL:-Qwen/Qwen3-1.7B}
 MAX_SEQS=${MAX_SEQS:-16}
 MEM=${MEM:-0.42}          # per engine; two engines must fit on one card
 RATES=${RATES:-"4 8 16"}
+MODES=${MODES:-"direct rr fifo full edf"}
 DURATION=${DURATION:-60s}
 SEEDS=${SEEDS:-"1 2 3"}
 OUT=${OUT:-results/gpu-$(date +%Y%m%d-%H%M)}
@@ -76,12 +77,12 @@ wait_ready() { # port
 # one leaves free, so starting both at once races for the same memory.
 E0=$(start_engine 8000); wait_ready 8000
 E1=$(start_engine 8001); wait_ready 8001
-echo "both engines up; the run takes about 40 minutes"
+echo "both engines up; about $(( $(echo $SEEDS | wc -w) * $(echo $RATES | wc -w) * $(echo $MODES | wc -w) * 70 / 60 )) minutes to go"
 trap 'kill $E0 $E1 2>/dev/null || true' EXIT
 
 for SEED in $SEEDS; do
   for RATE in $RATES; do
-    for MODE in direct rr fifo full; do
+    for MODE in $MODES; do
       TAG="gpu-s${SEED}-r${RATE}-${MODE}"
       echo "=== $TAG ==="
       ./gpu/bin/router -addr 127.0.0.1:8080 -mode "$MODE" -protocol vllm \

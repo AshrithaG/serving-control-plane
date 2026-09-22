@@ -26,6 +26,7 @@ between them cannot come from a different client, backend, or workload.
 | `rr` | none | none | round robin |
 | `fifo` | one central queue, bounded dispatch | none | least loaded |
 | `full` | per-tenant deficit round robin | deadline-based | prefix affinity with a load guard |
+| `edf` | as `full`, each tenant's queue earliest deadline first | charged only for queued work due before the request | prefix affinity with a load guard |
 
 - **Admission control** projects wait plus service time from token debt the pool
   still owes and the decode rate the router has measured, and refuses at arrival
@@ -240,6 +241,29 @@ three. Restoring the entry brought traffic back 10 seconds later.
 ./deploy/spire/up.sh       # kind cluster, SPIRE, registration entries, router and backends
 ./deploy/spire/verify.sh   # rotation, refusal, revocation
 ```
+
+### Deadline ordering, in simulation
+
+The saturation run on the GPU showed `full` refusing nearly every 3-second
+request, because admission charged each one for all the queued batch work
+ahead of it, work it would never actually have waited behind under a sensible
+order. `edf` orders each tenant's queue by deadline and charges an arriving
+request only for work due before it. Deadline order rather than strict
+interactive-first, so batch work is delayed but never starved.
+
+At 14 requests/s in the simulator, about twice capacity:
+
+| policy | met deadline | goodput, requests/s | goodput, tokens/s | interactive met | batch met |
+|---|---|---|---|---|---|
+| fifo | 80 | 3.97 | 1,208 | 10.3% | 69.8% |
+| full | 77 | 3.82 | 1,164 | 9.7% | 67.4% |
+| edf | 151 | 7.51 | 1,038 | 59.5% | 40.7% |
+
+Read both goodput columns. `edf` nearly doubles goodput counted in requests and
+delivers 14% fewer tokens on time, because it spends capacity on short urgent
+requests instead of long ones. That is a trade between interactive users and
+batch throughput, not a free gain, and which side of it is right depends on
+what the operator is serving. The GPU run of `edf` is next.
 
 ## What the backend is
 

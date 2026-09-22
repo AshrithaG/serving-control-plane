@@ -28,6 +28,8 @@ between them cannot come from a different client, backend, or workload.
 | `fifo` | one central queue, bounded dispatch | none | least loaded |
 | `full` | per-tenant deficit round robin | deadline-based | prefix affinity with a load guard |
 | `edf` | as `full`, each tenant's queue earliest deadline first | charged only for queued work due before the request | prefix affinity with a load guard |
+| `prio` | as `edf`, and each request's deadline passed to vLLM as its priority | as `edf` | prefix affinity with a load guard |
+| `reserve` | as `edf`, with batch requests capped at half the dispatch slots | as `edf` | prefix affinity with a load guard |
 
 - **Admission control** projects wait plus service time from token debt the pool
   still owes and the decode rate the router has measured, and refuses at arrival
@@ -147,6 +149,29 @@ the previous run within 1% in five of six cells, and within 3.2% in the sixth
   of 3-second requests meet their deadline past saturation. Reordering the
   router's queue cannot help a request stuck behind long batch requests already
   running on the engine; that takes priority inside the engine itself.
+
+### Engine priority and slot reservation: predictions, written before the run
+
+`edf` still loses two thirds of interactive requests past saturation. Two
+changes aimed at that are built and waiting for the GPU:
+
+- **`prio`** passes each request's deadline to vLLM as its priority, with the
+  engines on `--scheduling-policy priority`, and lets twice the engines'
+  running slots through so vLLM has a queue of its own to reorder.
+  **Prediction: no measurable change from `edf`.** vLLM 0.28's scheduler
+  (`vllm/v1/core/sched/scheduler.py`) preempts a running request only when the
+  KV cache cannot fit a new one, and this workload uses about 7,000 of each
+  engine's 59,776 KV tokens. Short of that, priority only reorders requests
+  waiting for a slot, which is what `edf` already does in the router.
+- **`reserve`** caps batch requests at half the router's dispatch slots, so an
+  interactive request never waits for a slot held by a long batch request.
+  **Prediction: interactive requests met rise above `edf`'s and batch requests
+  met fall.** In the simulator at twice capacity it raised interactive from
+  60% to 68% met with batch unchanged; the GPU may not be as generous.
+
+Both run in one session against `edf` as the control, with every engine on the
+priority policy, which is identical to FCFS for requests that carry no
+priority.
 
 ### Other things the GPU showed
 

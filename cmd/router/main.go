@@ -59,7 +59,7 @@ func parseWeights(s string) map[string]float64 {
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
-	mode := flag.String("mode", "full", "direct | rr | fifo | full | edf")
+	mode := flag.String("mode", "full", "direct | rr | fifo | full | edf | prio | reserve")
 	backends := flag.String("backends", "r0=http://127.0.0.1:8100", "name=url pairs")
 	place := flag.String("placement", "prefix-affinity", "round-robin | least-loaded | prefix-affinity")
 	imbalance := flag.Int("imbalance", 2, "in-flight gap at which prefix affinity gives way to load")
@@ -74,6 +74,7 @@ func main() {
 	maxSeqs := flag.Int("max-num-seqs", backend.MaxRunningVLLM, "the engines' --max-num-seqs, vllm protocol only")
 	socket := flag.String("spiffe-socket", "", "SPIRE agent Workload API socket; enables mTLS to backends")
 	backendID := flag.String("backend-id", "", "SPIFFE ID every backend must present")
+	batchShare := flag.Float64("batch-share", 0.5, "reserve mode: share of dispatch slots batch requests may hold")
 	flag.Parse()
 	backend.Model = *model
 	backend.MaxRunningVLLM = *maxSeqs
@@ -86,7 +87,9 @@ func main() {
 		pl = placement.ByName("round-robin", 0)
 	}
 	adm := &admission.Controller{Mode: admission.Mode(*admit), Safety: *safety}
-	if m != router.Full && m != router.EDF {
+	switch m {
+	case router.Full, router.EDF, router.Prio, router.Reserve:
+	default:
 		adm.Mode = admission.Off
 	}
 
@@ -125,7 +128,7 @@ func main() {
 	rt := router.New(router.Config{
 		Mode: m, Pool: pool, Placement: pl, Admission: adm,
 		Quantum: *quantum, Weights: parseWeights(*weights),
-		MaxInflight: *maxInflight, Records: rec,
+		MaxInflight: *maxInflight, Records: rec, BatchShare: *batchShare,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

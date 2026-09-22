@@ -183,3 +183,59 @@ func (d *DRR) Pop() (Item, bool) {
 		d.next = (d.next + 1) % len(d.order)
 	}
 }
+
+// PopEligible is Pop restricted to items the predicate accepts, in the same
+// deficit round robin order and, under deadline ordering, the same deadline
+// order among eligible items. It returns false when no queued item is eligible.
+//
+// It exists for capacity reservation: when batch work has used its share of
+// dispatch slots, the scheduler has to skip past it to the next interactive
+// request instead of stalling behind it.
+func (d *DRR) PopEligible(ok func(Item) bool) (Item, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.n == 0 {
+		return Item{}, false
+	}
+	barren := 0 // consecutive queues visited with nothing eligible
+	for {
+		name := d.order[d.next]
+		q := d.queues[name]
+		if q.items.Len() == 0 {
+			q.deficit = 0
+		}
+		var el *list.Element
+		for e := q.items.Front(); e != nil; e = e.Next() {
+			if ok(e.Value.(Item)) {
+				el = e
+				break
+			}
+		}
+		if el == nil {
+			d.credited = false
+			d.next = (d.next + 1) % len(d.order)
+			if barren++; barren >= len(d.order) {
+				return Item{}, false
+			}
+			continue
+		}
+		barren = 0
+		w := q.weight
+		if w <= 0 {
+			w = 1
+		}
+		if !d.credited {
+			q.deficit += d.quantum * w
+			d.credited = true
+		}
+		it := el.Value.(Item)
+		if it.Cost <= q.deficit {
+			q.items.Remove(el)
+			q.deficit -= it.Cost
+			d.n--
+			return it, true
+		}
+		d.credited = false
+		d.next = (d.next + 1) % len(d.order)
+	}
+}

@@ -112,3 +112,22 @@ func TestCostAheadCountsOnlyEarlierDeadlines(t *testing.T) {
 		t.Fatalf("work ahead of a 3s request = %v, want 70 (the 20s batch item is behind it)", got)
 	}
 }
+
+func TestPopEligibleSkipsToTheNextEligibleItem(t *testing.T) {
+	d := NewDRR(1000)
+	d.OrderByDeadline(true)
+	now := time.Now()
+	d.Push(Item{Tenant: "a", Cost: 10, Deadline: now.Add(2 * time.Second), Value: "batch"})
+	d.Push(Item{Tenant: "a", Cost: 10, Deadline: now.Add(3 * time.Second), Value: "interactive"})
+	notBatch := func(it Item) bool { return it.Value.(string) != "batch" }
+	it, ok := d.PopEligible(notBatch)
+	if !ok || it.Value.(string) != "interactive" {
+		t.Fatalf("got %v %v, want the interactive item past the capped batch one", it.Value, ok)
+	}
+	if _, ok := d.PopEligible(notBatch); ok {
+		t.Fatal("returned an item when only an ineligible one was left")
+	}
+	if it, ok := d.Pop(); !ok || it.Value.(string) != "batch" {
+		t.Fatal("the skipped batch item was lost")
+	}
+}

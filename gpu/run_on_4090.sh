@@ -48,6 +48,10 @@ done
 MODEL=${MODEL:-Qwen/Qwen3-1.7B}
 MAX_SEQS=${MAX_SEQS:-16}
 MEM=${MEM:-0.42}          # per engine; two engines must fit on one card
+# fcfs matches the earlier runs. "priority" is needed for the prio mode, and is
+# identical to fcfs for requests that carry no priority, so the other modes in
+# the same run stay comparable with each other.
+POLICY=${POLICY:-fcfs}
 RATES=${RATES:-"4 8 16"}
 MODES=${MODES:-"direct rr fifo full edf"}
 DURATION=${DURATION:-60s}
@@ -56,11 +60,12 @@ OUT=${OUT:-results/gpu-$(date +%Y%m%d-%H%M)}
 mkdir -p "$OUT"
 
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | tee "$OUT/gpu.txt"
+echo "scheduling policy: $POLICY, modes: $MODES, rates: $RATES" | tee -a "$OUT/gpu.txt"
 "$PY" -c "import vllm; print('vllm', vllm.__version__)" | tee -a "$OUT/gpu.txt"
 
 start_engine() { # port
   "$VLLM" serve "$MODEL" --port "$1" --gpu-memory-utilization "$MEM" \
-    --max-num-seqs "$MAX_SEQS" --enable-prefix-caching \
+    --max-num-seqs "$MAX_SEQS" --enable-prefix-caching --scheduling-policy "$POLICY" \
     > "$OUT/engine-$1.log" 2>&1 &
   echo $!
 }
@@ -84,11 +89,16 @@ for SEED in $SEEDS; do
   for RATE in $RATES; do
     for MODE in $MODES; do
       TAG="gpu-s${SEED}-r${RATE}-${MODE}"
+      # prio needs requests waiting inside vLLM for its priority to reorder, so
+      # the router lets twice the engines' running slots through; every other
+      # mode keeps the queue in the router.
+      INFLIGHT=$((2 * MAX_SEQS))
+      if [ "$MODE" = prio ]; then INFLIGHT=$((4 * MAX_SEQS)); fi
       echo "=== $TAG ==="
       ./gpu/bin/router -addr 127.0.0.1:8080 -mode "$MODE" -protocol vllm \
         -model "$MODEL" -max-num-seqs "$MAX_SEQS" \
         -backends "r0=http://127.0.0.1:8000,r1=http://127.0.0.1:8001" \
-        -weights "acme=2,globex=1" -max-inflight $((2 * MAX_SEQS)) \
+        -weights "acme=2,globex=1" -max-inflight "$INFLIGHT" \
         -records "$OUT/$TAG.jsonl" > "$OUT/$TAG.router.log" 2>&1 &
       R=$!
       sleep 1

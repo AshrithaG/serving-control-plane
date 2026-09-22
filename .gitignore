@@ -2,3 +2,4 @@ results/*.jsonl
 results/**/*.jsonl
 /tmp
 gpu/bin/
+results/STALE-*/

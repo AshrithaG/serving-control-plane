@@ -45,6 +45,14 @@ for port in 8000 8001 8080; do
   fi
 done
 
+# The binaries have to be the ones this script was written for. On 2026-09-21
+# a run used binaries from an older copy: two of three policies silently ran as
+# something else. Every requested mode must be one this router knows.
+if [ ! -f gpu/bin/BUILD ]; then
+  echo "gpu/bin/BUILD is missing: run gpu/push_to_4090.sh on your Mac first" >&2
+  exit 1
+fi
+
 MODEL=${MODEL:-Qwen/Qwen3-1.7B}
 MAX_SEQS=${MAX_SEQS:-16}
 MEM=${MEM:-0.42}          # per engine; two engines must fit on one card
@@ -61,6 +69,13 @@ mkdir -p "$OUT"
 
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | tee "$OUT/gpu.txt"
 echo "scheduling policy: $POLICY, modes: $MODES, rates: $RATES" | tee -a "$OUT/gpu.txt"
+echo "build: $(cat gpu/bin/BUILD)" | tee -a "$OUT/gpu.txt"
+for m in $MODES; do
+  if ! ./gpu/bin/router -mode "$m" -check >/dev/null 2>&1; then
+    echo "the router on this machine does not know mode '$m': run gpu/push_to_4090.sh on your Mac first" >&2
+    exit 1
+  fi
+done
 "$PY" -c "import vllm; print('vllm', vllm.__version__)" | tee -a "$OUT/gpu.txt"
 
 start_engine() { # port
@@ -82,6 +97,15 @@ wait_ready() { # port
 # one leaves free, so starting both at once races for the same memory.
 E0=$(start_engine 8000); wait_ready 8000
 E1=$(start_engine 8001); wait_ready 8001
+# And the engines have to be on the policy that was asked for.
+if [ "$POLICY" != fcfs ]; then
+  for port in 8000 8001; do
+    if ! grep -q "'scheduling_policy': '$POLICY'" "$OUT/engine-$port.log"; then
+      echo "engine on $port did not start with --scheduling-policy $POLICY" >&2
+      exit 1
+    fi
+  done
+fi
 echo "both engines up; about $(( $(echo $SEEDS | wc -w) * $(echo $RATES | wc -w) * $(echo $MODES | wc -w) * 70 / 60 )) minutes to go"
 trap 'kill $E0 $E1 2>/dev/null || true' EXIT
 

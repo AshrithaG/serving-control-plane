@@ -116,7 +116,8 @@ The headline number needs this table beside it:
 The `edf` policy (below, under "Deadline ordering, in simulation") was run on
 the same card at 32 to 64 requests/s, three seeds, 74,527 requests, zero errors,
 every token count exact. FIFO and `full` were rerun alongside it and reproduced
-the previous run to within 2%. Medians of three seeds; raw records in
+the previous run within 1% in five of six cells, and within 3.2% in the sixth
+(`full` at 64 requests/s). Medians of three seeds; raw records in
 `results/gpu-20260921-2251/`.
 
 | offered | policy | goodput, requests/s | goodput, tokens/s | interactive met | batch met | TTFT p50 |
@@ -133,7 +134,7 @@ the previous run to within 2%. Medians of three seeds; raw records in
 
 - **Deep past saturation it is close to free.** At 48 and 64 requests/s `edf`
   delivers the same tokens on time as `full`, within the spread between seeds
-  (2,363 to 2,674 against 2,453 to 2,630 at 64), while meeting the deadline for
+  (2,363 to 2,674 against 2,498 to 2,630 at 64), while meeting the deadline for
   about twelve times as many interactive requests.
 - **Near the knee it is a real trade.** At 32 requests/s `edf` gives up 28% of
   FIFO's on-time tokens to raise interactive requests met from 7% to 33%.
